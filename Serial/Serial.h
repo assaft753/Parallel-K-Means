@@ -29,7 +29,7 @@ struct Cluster
 struct Clusters
 {
 	int size = 0;
-	Cluster* clusters;
+	Cluster* clusters = 0;
 };
 
 Cluster* init_data(Points* points, Clusters* clusters, int* limit, double* qm, int* t, double* dt);
@@ -59,5 +59,7 @@ double find_diameter(Cluster cluster);
 void free_helper_mat(double** mat, int clusters_amount);
 
 void print_cluster(double t, double q, Clusters* clusters);
+
+void free_points(Points* points);
 
 

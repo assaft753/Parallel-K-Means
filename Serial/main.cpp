@@ -43,6 +43,10 @@ int main()
 		printf("\n No clusters found\n");
 	}
 
+	free_points(&points);
+	free_clusters(&clusters);
+	free(new_cluster);
+
 	return 0;
 }
 
@@ -50,9 +54,9 @@ int main()
 Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * qm, int * t, double * dt)
 {
 	int points_amount, clusters_amount;
-	int pos_x, pos_y, pos_z;
-	int vel_x, vel_y,vel_z;
-	Cluster* temp_cluster = 0;
+	double pos_x, pos_y, pos_z;
+	double vel_x, vel_y,vel_z;
+	Cluster* new_cluster = 0;
 	FILE *fp;
 	fp = fopen("input.txt", "r");
 	fscanf(fp, "%d %d %d %f %d %f\n",&points_amount,&clusters_amount,t,dt,limit,qm);
@@ -63,11 +67,11 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 	clusters->size = clusters_amount;
 	clusters->clusters = (Cluster*)malloc(sizeof(Cluster)*clusters_amount);
 	
-	temp_cluster = (Cluster*)malloc(sizeof(Cluster)*clusters_amount);
+	new_cluster = (Cluster*)malloc(sizeof(Cluster)*clusters_amount);
 
 	for (int i = 0; i < points_amount; i++)
 	{
-		fscanf(fp, "%d %d %d %d %d %d\n", &pos_x, &pos_y, &pos_z, &vel_x, &vel_y, &vel_z);
+		fscanf(fp, "%f %f %f %f %f %f\n", &pos_x, &pos_y, &pos_z, &vel_x, &vel_y, &vel_z);
 		
 		points->points[i].id = i;
 		
@@ -85,14 +89,14 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 			clusters->clusters[i].center.y = pos_y;//
 			clusters->clusters[i].center.z = pos_z;//
 
-			temp_cluster[i].center.x = pos_x;
-			temp_cluster[i].center.y = pos_y;
-			temp_cluster[i].center.z = pos_z;
+			new_cluster[i].center.x = pos_x;
+			new_cluster[i].center.y = pos_y;
+			new_cluster[i].center.z = pos_z;
 		}
 	}
 
 	fclose(fp);
-	return temp_cluster;
+	return new_cluster;
 }
 
 void calculate_points_positions(Points* points, double t)
@@ -180,7 +184,7 @@ int find_min_distance_cluster(Point point, Cluster* new_cluster, int cluster_amo
 Axis axis_avg(Point** points, int amount)
 {
 	double sum_x = 0,sum_y = 0,sum_z = 0;
-	Axis* center_axis = (Axis*)malloc(sizeof(Axis));//
+	Axis center_axis;
 	
 	for (int i = 0; i < amount; i++)
 	{
@@ -190,10 +194,10 @@ Axis axis_avg(Point** points, int amount)
 		sum_z += p->axis_location.z;
 	}
 
-	center_axis->x = sum_x / amount;
-	center_axis->y = sum_y / amount;
-	center_axis->z = sum_z / amount;
-	return *(center_axis);
+	center_axis.x = sum_x / amount;
+	center_axis.y = sum_y / amount;
+	center_axis.z = sum_z / amount;
+	return center_axis;
 }
 
 void calculate_cluster_center(Cluster* new_cluster,Clusters* clusters, int amount)
@@ -261,7 +265,6 @@ void copy_cluster(Clusters* clusters, Cluster** new_cluster)
 	free_clusters(clusters);
 	clusters->clusters = *new_cluster;
 	*new_cluster = (Cluster*)malloc(sizeof(Cluster)*clusters->size);
-
 }
 
 void free_clusters(Clusters* clusters)
@@ -363,6 +366,11 @@ void print_cluster(double t, double q, Clusters* clusters)
 		printf("%f %f %f\n", x, y, z);
 	}
 	fflush(stdout);
+}
+
+void free_points(Points* points)
+{
+	free(points->points);
 }
 
 
