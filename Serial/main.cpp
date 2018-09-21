@@ -8,22 +8,41 @@ int main()
 	Points points;
 	Clusters clusters;
 	Cluster* new_cluster;
-	int limit, t, i, n, max_n, good;
-	double qm, dt;
+	int limit, t, i, n, max_n, good = 0;
+	double qm, dt,current_t, q;
 	new_cluster = init_data(&points, &clusters, &limit, &qm, &t, &dt);
 	max_n = t / dt;
-	for (i = 0, n = 0; i < limit || n <= max_n; i++, n++)
+	for (i = 0, n = 0; (i < limit || n <= max_n) && good == 0; i++, n++)
 	{
-		calculate_points_positions(&points,n,dt);
+		current_t = n*dt;
+		calculate_points_positions(&points,current_t);
+		
 		group_points_to_clusters(&points, new_cluster,clusters.size);
-		calculate_cluster_center(new_cluster, clusters.size);
+		
+		calculate_cluster_center(new_cluster,&clusters,clusters.size);
+		
 		good = check_points_transfer(clusters.clusters, new_cluster, clusters.size);
+		
 		copy_cluster(&clusters, &new_cluster);
+		
 		if (good == 1)
 		{
-			break;
+			q = evaluate_qm(&clusters);
+			if (q < qm)
+			{
+				print_cluster(current_t,q,&clusters);
+			}
+			else
+			{
+				good = 0;
+			}
 		}
 	}
+	if (good == 0)
+	{
+		printf("\n No clusters found\n");
+	}
+
 	return 0;
 }
 
@@ -76,9 +95,8 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 	return temp_cluster;
 }
 
-void calculate_points_positions(Points* points, int n, double dt)
+void calculate_points_positions(Points* points, double t)
 {
-	double t = n * dt;
 	for (int i = 0; i < points->size; i++)
 	{
 		calculate_point_position(&points->points[i],t);
@@ -117,7 +135,7 @@ void group_points_to_clusters(Points* points, Cluster* new_cluster, int cluster_
 	}
 }
 
-int point_2_point_distance(Axis p1, Axis p2)
+double point_2_point_distance(Axis p1, Axis p2)
 {
 	double sub_x, sub_y, sub_z;
 	double pow_x, pow_y, pow_z;
@@ -138,7 +156,8 @@ int point_2_point_distance(Axis p1, Axis p2)
 
 int find_min_distance_cluster(Point point, Cluster* new_cluster, int cluster_amount)
 {
-	int index = -1, value = -1,min_value = -1;
+	int index = -1,min_value = -1;
+	double value = -1;
 	for (int i = 0; i < cluster_amount; i++)
 	{
 		value = point_2_point_distance(point.axis_location, new_cluster->center);
@@ -161,7 +180,7 @@ int find_min_distance_cluster(Point point, Cluster* new_cluster, int cluster_amo
 Axis axis_avg(Point** points, int amount)
 {
 	double sum_x = 0,sum_y = 0,sum_z = 0;
-	Axis* center_axis = (Axis*)malloc(sizeof(Axis));
+	Axis* center_axis = (Axis*)malloc(sizeof(Axis));//
 	
 	for (int i = 0; i < amount; i++)
 	{
@@ -177,11 +196,18 @@ Axis axis_avg(Point** points, int amount)
 	return *(center_axis);
 }
 
-void calculate_cluster_center(Cluster* new_cluster, int amount)
+void calculate_cluster_center(Cluster* new_cluster,Clusters* clusters, int amount)
 {
 	for (int i = 0; i < amount; i++)
 	{
-		new_cluster[i].center = axis_avg(new_cluster[i].cluster_points, new_cluster[i].size);
+		if (new_cluster[i].size > 0)
+		{
+			new_cluster[i].center = axis_avg(new_cluster[i].cluster_points, new_cluster[i].size);
+		}
+		else
+		{
+			new_cluster[i].center = clusters->clusters[i].center;
+		}
 	}
 }
 
@@ -247,3 +273,96 @@ void free_clusters(Clusters* clusters)
 	}
 	free(clusters->clusters);
 }
+
+double evaluate_qm(Clusters* clusters)
+{
+	double** mat = malloc_helper_distance_matrix(clusters->size);
+	double cluster_max_distance,sum=0,q;
+	int counter = 0;
+	for (int i = 0; i < clusters->size; i++)
+	{
+		cluster_max_distance = find_diameter(clusters->clusters[i]);
+		for (int j = 0; j < clusters->size; j++)
+		{
+			if (i != j)
+			{
+				double distance_from_clusters;
+				counter++;
+				if (i < j)
+				{
+					Axis c1 = clusters[i].clusters->center;
+					Axis c2 = clusters[j].clusters->center;
+					distance_from_clusters = point_2_point_distance(c1, c2);
+					mat[i][j] = distance_from_clusters;
+				}
+				else
+				{
+					distance_from_clusters = mat[j][i];
+				}
+				sum += cluster_max_distance / distance_from_clusters;
+			}
+		}
+	}
+	free_helper_mat(mat, clusters->size);
+	q = sum / counter;
+	return q;
+}
+
+double** malloc_helper_distance_matrix(int clusters_amount)
+{
+	double** mat = (double**)malloc(sizeof(double*)*clusters_amount);
+	for (int i = 0; i < clusters_amount; i++)
+	{
+		mat[i] = (double*)malloc(sizeof(double)*clusters_amount);
+	}
+	return mat;
+}
+
+double find_diameter(Cluster cluster)
+{
+	double max_value=-1,temp_value;
+	for (int i = 0; i < cluster.size; i++)
+	{
+		Point* p1 = cluster.cluster_points[i];
+		for (int j = 0; j < cluster.size; j++)
+		{
+			if (i != j)
+			{
+				Point* p2 = cluster.cluster_points[j];
+				temp_value = point_2_point_distance(p1->axis_location, p2->axis_location);
+				if (temp_value > max_value)
+				{
+					max_value = temp_value;
+				}
+			}
+		}
+	}
+	return max_value;
+}
+
+void free_helper_mat(double** mat, int clusters_amount)
+{
+	for (int i = 0; i < clusters_amount; i++)
+	{
+		double* arr = *(mat + i);
+		free(arr);
+	}
+	free(mat);
+}
+
+void print_cluster(double t, double q, Clusters* clusters)
+{
+	printf("\nFirst occurrence t = %f  with q = %f\n", t, q);
+	printf("Centers of the clusters:\n");
+	for (int i = 0; i < clusters->size; i++)
+	{
+		double x = clusters->clusters[i].center.x;
+		double y = clusters->clusters[i].center.y;
+		double z = clusters->clusters[i].center.z;
+
+		printf("%f %f %f\n", x, y, z);
+	}
+	fflush(stdout);
+}
+
+
