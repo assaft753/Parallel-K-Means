@@ -58,20 +58,23 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 	double vel_x, vel_y,vel_z;
 	Cluster* new_cluster = 0;
 	FILE *fp;
-	fp = fopen("input.txt", "r");
-	fscanf(fp, "%d %d %d %f %d %f\n",&points_amount,&clusters_amount,t,dt,limit,qm);
+	fp = fopen("C:\\Users\\Assaf Tayouri\\Documents\\Visual Studio 2015\\Projects\\K-Means\\Debug\\abc.txt", "r");
+	fscanf(fp, "%d %d %d %lf %d %lf\n",&points_amount,&clusters_amount,t,dt,limit,qm);
 	
 	points->size = points_amount;
-	points->points = (Point*)malloc(sizeof(Point)*points_amount);
+	points->points = (Point*)calloc(points_amount, sizeof(Point));
+	//points->points = (Point*)malloc(sizeof(Point)*points_amount);
 	
 	clusters->size = clusters_amount;
-	clusters->clusters = (Cluster*)malloc(sizeof(Cluster)*clusters_amount);
+	clusters->clusters = (Cluster*)calloc(clusters_amount, sizeof(Cluster));
+	//clusters->clusters = (Cluster*)malloc(sizeof(Cluster)*clusters_amount);
 	
-	new_cluster = (Cluster*)malloc(sizeof(Cluster)*clusters_amount);
+	//new_cluster = (Cluster*)malloc(sizeof(Cluster)*clusters_amount);
+	new_cluster = (Cluster*)calloc(clusters_amount, sizeof(Cluster));
 
 	for (int i = 0; i < points_amount; i++)
 	{
-		fscanf(fp, "%f %f %f %f %f %f\n", &pos_x, &pos_y, &pos_z, &vel_x, &vel_y, &vel_z);
+		fscanf(fp, "%lf %lf %lf %lf %lf %lf\n", &pos_x, &pos_y, &pos_z, &vel_x, &vel_y, &vel_z);
 		
 		points->points[i].id = i;
 		
@@ -121,6 +124,7 @@ void calculate_point_position(Point* point,double t)
 void group_points_to_clusters(Points* points, Cluster* new_cluster, int cluster_amount)
 {
 	int index;
+	int temp = 0;
 	for (int i = 0; i < points->size; i++)
 	{
 		index = find_min_distance_cluster(points->points[i], new_cluster, cluster_amount);
@@ -135,7 +139,9 @@ void group_points_to_clusters(Points* points, Cluster* new_cluster, int cluster_
 			new_cluster[index].size++;
 			cluster_points = (Point**)realloc(cluster_points, sizeof(Point*)*new_cluster[index].size);
 		}
-		cluster_points[new_cluster[index].size - 1] = (points->points + 1);
+		cluster_points[new_cluster[index].size - 1] = (points->points + i);
+		new_cluster[index].cluster_points = cluster_points;
+		new_cluster[index].cluster_points[temp];
 	}
 }
 
@@ -160,11 +166,11 @@ double point_2_point_distance(Axis p1, Axis p2)
 
 int find_min_distance_cluster(Point point, Cluster* new_cluster, int cluster_amount)
 {
-	int index = -1,min_value = -1;
-	double value = -1;
+	int index = -1;
+	double value = -1, min_value = -1;
 	for (int i = 0; i < cluster_amount; i++)
 	{
-		value = point_2_point_distance(point.axis_location, new_cluster->center);
+		value = point_2_point_distance(point.axis_location, new_cluster[i].center);
 		
 		if (min_value == -1)
 		{
@@ -264,7 +270,7 @@ void copy_cluster(Clusters* clusters, Cluster** new_cluster)
 {
 	free_clusters(clusters);
 	clusters->clusters = *new_cluster;
-	*new_cluster = (Cluster*)malloc(sizeof(Cluster)*clusters->size);
+	*new_cluster =(Cluster*)calloc(clusters->size, sizeof(Cluster));
 }
 
 void free_clusters(Clusters* clusters)
