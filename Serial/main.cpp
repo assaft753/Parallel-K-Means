@@ -13,7 +13,7 @@ int main()
 	double qm, dt,current_t, q;
 	new_cluster = init_data(&points, &clusters, &limit, &qm, &t, &dt);
 	max_n = t / dt;
-	print(&clusters, new_cluster, 0, points);
+	print(&clusters, new_cluster, 0, points);//
 	for (i = 0, n = 0; (i < limit || n <= max_n) && good == 0; i++, n++)
 	{
 		current_t = n*dt;
@@ -35,10 +35,10 @@ int main()
 		
 		if (good == 1)
 		{
-			q = evaluate_qm(&clusters);
+			q = evaluate_qm(&clusters);//OK
 			if (q < qm)
 			{
-				print_cluster(current_t,q,&clusters);
+				print_cluster(current_t,q,&clusters);//
 			}
 			else
 			{
@@ -129,24 +129,26 @@ void calculate_point_position(Point* point,double t)
 void group_points_to_clusters(Points* points, Cluster* new_cluster, int cluster_amount)
 {
 	int index;
-	//int temp = 0;
 	for (int i = 0; i < points->size; i++)
 	{
-		index = find_min_distance_cluster(points->points[i], new_cluster, cluster_amount);
+		index = find_min_distance_cluster(points->points[i], new_cluster, cluster_amount);//V
 		Point** cluster_points = new_cluster[index].cluster_points;
-		if (new_cluster[index].size == 0)
-		{
-			cluster_points = (Point**)malloc(sizeof(Point*));
-			new_cluster[index].size = 1;
-		}
-		else
-		{
-			new_cluster[index].size++;
-			cluster_points = (Point**)realloc(cluster_points, sizeof(Point*)*new_cluster[index].size);
-		}
+		
+		if (new_cluster[index].size == 0)//
+		{//
+			cluster_points = (Point**)malloc(sizeof(Point*));//
+			new_cluster[index].size = 1;//
+		}//
+
+		else//
+		{//
+			new_cluster[index].size++;//
+			cluster_points = (Point**)realloc(cluster_points, sizeof(Point*)*new_cluster[index].size);//
+		}//
+
+		//new_cluster[index].size++;
 		cluster_points[new_cluster[index].size - 1] = (points->points + i);
-		new_cluster[index].cluster_points = cluster_points;
-		//new_cluster[index].cluster_points[temp];
+		new_cluster[index].cluster_points = cluster_points;//
 	}
 }
 
@@ -276,6 +278,7 @@ void copy_cluster(Clusters* clusters, Cluster** new_cluster)
 	free_clusters(clusters);
 	clusters->clusters = *new_cluster;
 	*new_cluster =(Cluster*)calloc(clusters->size, sizeof(Cluster));
+	
 	for (int i = 0; i < clusters->size; i++)
 	{
 		(*new_cluster)[i].center = clusters->clusters[i].center;
@@ -361,12 +364,8 @@ double find_diameter(Cluster cluster)
 			{
 				Point* p2 = cluster.cluster_points[j];
 				temp_value = point_2_point_distance(p1->axis_location, p2->axis_location);
-				printf("\n two points %d %d [%lf]\n", p1->id, p2->id, temp_value);//
-				fflush(stdout);//
 				if (temp_value > max_value)
 				{
-					printf("\n max  two points %d %d [%lf]\n", p1->id, p2->id, temp_value);//
-					fflush(stdout);//
 					max_value = temp_value;
 				}
 			}
