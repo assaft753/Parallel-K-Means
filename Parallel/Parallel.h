@@ -5,10 +5,11 @@
 
 #define CALCULATE_POINTS_FLAG 1
 #define GROUP_POINTS_FLAG 3
+#define CHECK_TRANSFER_POINTS 4
 #define MASTER 0
 struct Axis
 {
-	double x = 1;
+	double x = 0;
 	double y = 0;
 	double z = 0;
 };
@@ -78,6 +79,15 @@ int slave_group_points_to_clusters(MPI_Datatype axis_type, MPI_Datatype point_ty
 
 Cluster_Parallel* group_points_to_clusters(Axis* center_axis_arr, int cluster_amount, Point* points, int amount, cudaDeviceProp device_prop);
 
+int* cuda_group_points_to_clusters(Point* points, int points_amount, Axis* clusters_center_axis, int cluster_amount, cudaDeviceProp device_prop);
+Cluster_Parallel* init_cluster_parallel(int cluster_amount, int points_amount);
+void unpack_elements(int* position, char* buffer, int buffer_size, void* elements, int elements_amount, MPI_Datatype type);
+void unpack_clusters_points_from_slaves(Cluster* new_cluster, int cluster_amount, MPI_Datatype point_type, int src);
+
+void recieve_points_from_slaves(Cluster* new_cluster, int clusters_amount, int num_of_proc, MPI_Datatype point_type);
+
+void shrink_clusters_points(Cluster* new_cluster, int clusters_amount);
+
 double cuda_point_2_point_distance(Axis p1, Axis p2);
 
 //int cuda_find_min_distance_cluster(Point point, Cluster_Parallel* cluster_parallel, int cluster_amount);
@@ -99,7 +109,13 @@ void print_points(Point* points, int amount, int myid);
 int parallel_calculate_points_location(Point* points_arr, int amount, cudaDeviceProp device_prop, double t);
 void calculate_point_position(Point* point, double t);
 
+void calculate_cluster_center(Cluster* new_cluster, Clusters* clusters, int amount);
+Axis axis_avg(Point* points, int amount);
 
+int master_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster, int cluster_amount, int points_amount, int num_of_proc, cudaDeviceProp device_prop);
+int slave_check_points_transfer(cudaDeviceProp device_prop);
+void prepare_for_pack_elements(int* cluster_points_amount_arr, int* cluster_points_offset_arr, int cluster_amount);
+int pre_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster, int cluster_amount);
 
 int cuda_init();
 int cuda_reset();

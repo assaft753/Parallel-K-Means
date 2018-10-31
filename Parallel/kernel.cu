@@ -2,23 +2,22 @@
 #include "Parallel.h"
 #include <stdio.h>
 
-__global__ void kernel_points_position_calculation(Point* points,int jump,int myid,double t)
+__global__ void kernel_points_position_calculation(Point* points, int jump, int myid, double t)
 {
 	int thread_index = threadIdx.x;
 	int block_index = blockIdx.x;
 	int offset = (jump*block_index) + thread_index;
-	
+
 	Point* pos = points + offset;
 
-	printf("id [%d] in cuda point: %d\n", myid, pos->id);
 	Axis current_position = pos->axis_location;
 	Axis current_velocity = pos->axis_velocity;
 
 	pos->axis_location.x = current_position.x + t*current_velocity.x;
 	pos->axis_location.y = current_position.y + t*current_velocity.y;
 	pos->axis_location.z = current_position.z + t*current_velocity.z;
-
-	//printf("in cuda thread:[%d] block:[%d] id:[%d] %d\n", thread_index, block_index, myid, pos->id);
+		//if(pos->id == (500000 - 2))
+		//printf("in cuda1 point:[%d] id:[%d] %d\n", pos->id, myid);
 }
 
 __global__ void kernel_group_points(int* cluster_of_points, Point* points, int jump, Axis* clusters_center_axis, int cluster_amount)
@@ -52,12 +51,32 @@ __global__ void kernel_group_points(int* cluster_of_points, Point* points, int j
 	}
 
 	*int_pos = index;
-	
+	//printf("in cuda2 thread:[%d] block:[%d] id:[%d] %d\n", thread_index, block_index);
+}
+
+__device__ double cuda_point_2_point_distance(Axis p1, Axis p2)
+{
+	double sub_x, sub_y, sub_z;
+	double pow_x, pow_y, pow_z;
+	double result;
+
+	sub_x = fabs(p1.x - p2.x);
+	sub_y = fabs(p1.y - p2.y);
+	sub_z = fabs(p1.z - p2.z);
+
+	pow_x = pow(sub_x, 2);
+	pow_y = pow(sub_y, 2);
+	pow_z = pow(sub_z, 2);
+
+	result = sqrt(pow_x + pow_y + pow_z);
+
+	return result;
 }
 
 __global__ void kernel_test(int myid)
 {
-	//printf("in cuda myid:[%d] thread:[%d] block:[%d]\n",myid,threadIdx.x,blockIdx.x);
+	if(blockIdx.x == 2929-1)
+	printf("in cuda myid:[%d] thread:[%d] blockx:[%d] blocky:[%d] blockz:[%d]\n",myid,threadIdx.x,blockIdx.x,blockIdx.y,blockIdx.z);
 }
 
 
@@ -114,28 +133,10 @@ int cuda_kernel_group_points_to_clusters(int* cuda_cluster_of_points, int* cuda_
 	return 1;
 }
 
-double cuda_point_2_point_distance(Axis p1, Axis p2)
-{
-	double sub_x, sub_y, sub_z;
-	double pow_x, pow_y, pow_z;
-	double result;
-
-	sub_x = fabs(p1.x - p2.x);
-	sub_y = fabs(p1.y - p2.y);
-	sub_z = fabs(p1.z - p2.z);
-
-	pow_x = pow(sub_x, 2);
-	pow_y = pow(sub_y, 2);
-	pow_z = pow(sub_z, 2);
-
-	result = sqrt(pow_x + pow_y + pow_z);
-
-	return result;
-}
-
 void test(int myid)
 {
-	kernel_test << <2, 1024 >> > (myid);
+	kernel_test << <2929, 1024 >> > (0);
+	kernel_test << <1, 704>> > (-1);
 }
 
 

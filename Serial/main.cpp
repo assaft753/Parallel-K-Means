@@ -2,10 +2,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <mpi.h>
 void print(Clusters* clusters, Cluster* cluster, int d, Points points);
+
+void print_points(Point* points, int amount, int myid)
+{
+	for (int i = 0; i < amount; i++)
+	{
+		printf("from [%d] axis: x:%lf %lf %lf %lf %lf %lf %d\n", myid, points[i].axis_location.x, points[i].axis_location.y, points[i].axis_location.z, points[i].axis_velocity.x, points[i].axis_velocity.y, points[i].axis_velocity.z, points[i].id);
+		fflush(stdout);
+	}
+}
 
 int main()
 {
+	
+	double t1, t2; 
+	MPI_Init(0, 0);
 	Points points;
 	Clusters clusters;
 	Cluster* new_cluster;
@@ -13,29 +26,40 @@ int main()
 	double qm, dt,current_t, q;
 	new_cluster = init_data(&points, &clusters, &limit, &qm, &t, &dt);
 	max_n = t / dt;
-	print(&clusters, new_cluster, 0, points);//
-	for (i = 0, n = 0; (i < limit || n <= max_n) && good == 0; i++, n++)
+
+	t1 = MPI_Wtime();
+	calculate_points_positions(&points, 0.2);//0.1
+	group_points_to_clusters(&points, new_cluster, clusters.size);
+	calculate_cluster_center(new_cluster, &clusters, clusters.size);
+	t2 = MPI_Wtime();
+	printf("time %1.4f\n", t2 - t1);
+	fflush(stdout);
+	
+	
+	print(&clusters, new_cluster, 5, points);
+
+	/*for (i = 0, n = 0; (i < limit || n <= max_n) && good == 0; i++, n++)
 	{
 		current_t = n*dt;
-		calculate_points_positions(&points,current_t);//OK
-		print(&clusters, new_cluster, 1,points);//
+		calculate_points_positions(&points,current_t);
+		//print(&clusters, new_cluster, 1,points);//
 		
-		group_points_to_clusters(&points, new_cluster,clusters.size);//OK
-		print(&clusters, new_cluster, 2, points);//
+		group_points_to_clusters(&points, new_cluster,clusters.size);
+		//print(&clusters, new_cluster, 2, points);//
 		
-		calculate_cluster_center(new_cluster,&clusters,clusters.size);//OK
-		print(&clusters, new_cluster, 3, points);//
+		calculate_cluster_center(new_cluster,&clusters,clusters.size);
+		//print(&clusters, new_cluster, 3, points);//
 		
-		good = check_points_transfer(clusters.clusters, new_cluster, clusters.size);//OK
+		good = check_points_transfer(clusters.clusters, new_cluster, clusters.size);
 		printf("\ngood = %d \n", good);//
-		print(&clusters, new_cluster, 4, points);//
+		//print(&clusters, new_cluster, 4, points);//
 		
-		copy_cluster(&clusters, &new_cluster);//OK
+		copy_cluster(&clusters, &new_cluster);
 		print(&clusters, new_cluster, 5, points);//
 		
 		if (good == 1)
 		{
-			q = evaluate_qm(&clusters);//OK
+			q = evaluate_qm(&clusters);
 			if (q < qm)
 			{
 				print_cluster(current_t,q,&clusters);//
@@ -45,16 +69,16 @@ int main()
 				good = 0;
 			}
 		}
-	}
+	}*/
 
-	if (good == 0)
+	/*if (good == 0)
 	{
 		printf("\n No clusters found\n");
 	}
 
 	free_points(&points);
 	free_clusters(&clusters);
-	free(new_cluster);
+	free(new_cluster);*/
 
 	return 0;
 }
@@ -66,7 +90,7 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 	double vel_x, vel_y,vel_z;
 	Cluster* new_cluster = 0;
 	FILE *fp;
-	fp = fopen("C:\\Users\\Assaf Tayouri\\Documents\\Visual Studio 2015\\Projects\\K-Means\\Debug\\abc.txt", "r");
+	fp = fopen("C:\\Users\\Assaf Tayouri\\Documents\\Visual Studio 2015\\Projects\\K-Means\\abc.txt", "r");
 	fscanf(fp, "%d %d %d %lf %d %lf\n",&points_amount,&clusters_amount,t,dt,limit,qm);
 	
 	points->size = points_amount;

@@ -5,7 +5,63 @@
 #include <stdlib.h>
 #include <omp.h>
 
+void print(Clusters* clusters, Cluster* cluster, int d, Points points)
+{
+	printf("\nfrom %d:\n #################################\n", d);
+	fflush(stdout);
+	printf("Status of Points:[\n");
+	fflush(stdout);
+	for (int k = 0; k < points.size; k++)
+	{
+		printf("id = %d x = %lf y = %lf z = %lf\n", points.points[k].id, points.points[k].axis_location.x, points.points[k].axis_location.y, points.points[k].axis_location.z);
+	}
+	printf("]\n");
+	printf("start main clusters*******************************\n");
+	for (int i = 0; i < clusters->size; i++)
+	{
+		Cluster c = clusters->clusters[i];
+		Point* p = c.cluster_points;
+		printf("cluster number (%d) with center x = %lf y = %lf z = %lf\n", i, c.center.x, c.center.y, c.center.z);
+		printf("++++++++++++++++++++++++++++++++++\n");
+		for (int j = 0; j < c.size; j++)
+		{
+			printf("id = %d x = %lf y = %lf z = %lf\n", p[j].id, p[j].axis_location.x, p[j].axis_location.y, p[j].axis_location.z);
+		}
+		printf("\n++++++++++++++++++++++++++++++++++\n");
+	}
+	printf("end main clusters*******************************\n\n");
+
+	printf("start new clusters*******************************\n");
+	for (int i = 0; i < clusters->size; i++)
+	{
+		Cluster c = cluster[i];
+		Point* p = c.cluster_points;
+		printf("cluster number (%d) with center x = %lf y = %lf z = %lf\n", i, c.center.x, c.center.y, c.center.z);
+		printf("++++++++++++++++++++++++++++++++++\n");
+		for (int j = 0; j < c.size; j++)
+		{
+			printf("id = %d x = %lf y = %lf z = %lf\n", p[j].id, p[j].axis_location.x, p[j].axis_location.y, p[j].axis_location.z);
+		}
+		printf("\n++++++++++++++++++++++++++++++++++\n");
+	}
+	printf("end new clusters*******************************\n\n");
+
+	printf("###################################################\n");
+	fflush(stdout);
+}
+double t1, t2;
 int my_id;
+void start()
+{
+		t1 = MPI_Wtime();
+}
+
+void finish() {
+		t2 = MPI_Wtime();
+		printf("time %1.4f id %d\n", t2 - t1, my_id);
+		fflush(stdout);
+}
+
 int main(int argc, char **argv)
 {
 	int myid, num_of_proc;
@@ -18,15 +74,13 @@ int main(int argc, char **argv)
 	MPI_Datatype point_type;
 
 	cudaDeviceProp device_prop;
-
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 	MPI_Comm_size(MPI_COMM_WORLD, &num_of_proc);
-
+	
 	my_id = myid;
 
 	cuda_error = cuda_init();
-
 	if (num_of_proc < 3 || cuda_error == 0)
 	{
 		printf("run this K-Means on 3 or more proccess or check your cuda card\n");
@@ -53,10 +107,26 @@ int main(int argc, char **argv)
 
 			max_n = t / dt;
 
+			start();
+			master_calculate_points_positions(&points, 0.2, num_of_proc, point_type, device_prop);//error check
+			master_group_points_to_clusters(&points, new_cluster, clusters.size, axis_type, num_of_proc, point_type, device_prop); //error check
+			calculate_cluster_center(new_cluster, &clusters, clusters.size);//can be done with mpi
+			master_check_points_transfer(new_cluster, clusters.clusters, clusters.size,points.size, device_prop);//switch clusters
 
-			//test_cuda(myid);
-			//master_calculate_points_positions(&points, 0.1, num_of_proc, point_type, device_prop);
-			master_group_points_to_clusters(&points, new_cluster, clusters.size, axis_type,num_of_proc,point_type,device_prop);
+			finish();
+			
+			print(&clusters, new_cluster, 5, points);
+			fflush(stdout);
+		
+			/*int thread_per_block;
+			int req_blocks;
+			int leftover_threads;
+			int leftover_block;
+			cuda_blocks_calculation(&thread_per_block, &req_blocks, &leftover_threads, &leftover_block, device_prop, 1000000);
+			printf("thread_per_block %d req_blocks %d leftover_threads %d leftover_block %d\n", thread_per_block, req_blocks, leftover_threads, leftover_block);
+			fflush(stdout);
+			test_cuda(my_id);*/
+		
 		}
 
 		else
@@ -66,8 +136,8 @@ int main(int argc, char **argv)
 
 			while (flag != 0)
 			{
-				printf("myid [%d] listenning\n", my_id);
-				fflush(stdout);
+				//printf("myid [%d] listenning\n", my_id);
+				//fflush(stdout);
 				broadcast_flag(&flag);
 
 				switch (flag)
@@ -83,6 +153,10 @@ int main(int argc, char **argv)
 
 				case GROUP_POINTS_FLAG:
 					slave_group_points_to_clusters(axis_type,point_type,device_prop);
+					break;
+				
+				case CHECK_TRANSFER_POINTS:
+					slave_check_points_transfer(device_prop);
 
 				default:
 					break;
@@ -90,7 +164,6 @@ int main(int argc, char **argv)
 			}
 		}
 	}
-	
 	cuda_reset();
 	MPI_Finalize();
 	return 0;
@@ -110,16 +183,16 @@ void test_cuda_omp(int myid)
 	#pragma omp parallel for
 	for (int i = 0; i < 10; i++)
 	{
-		printf("core %d myid %d\n", omp_get_thread_num(),myid);
-		fflush(stdout);
+		//printf("core %d myid %d\n", omp_get_thread_num(),myid);
+		//fflush(stdout);
 		test(myid);
 	}
 	cudaStatus = cudaDeviceSynchronize();
 	
 	if (cudaStatus != cudaSuccess)
 	{
-		printf("id [%d] error in cuda\n",myid);
-		fflush(stdout);
+		//printf("id [%d] error in cuda\n",myid);
+		//fflush(stdout);
 	}
 }
 
@@ -162,7 +235,6 @@ void init_point_struct(MPI_Datatype* point_type, MPI_Datatype axis_type)
 	MPI_Type_commit(point_type);
 }
 
-
 void cuda_init_properties(cudaDeviceProp * device_prop)
 {
 	cudaGetDeviceProperties(device_prop, 0);
@@ -175,7 +247,7 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 	double vel_x, vel_y, vel_z;
 	Cluster* new_cluster = 0;
 	FILE *fp;
-	fp = fopen("C:\\Users\\Assaf Tayouri\\Documents\\Visual Studio 2015\\Projects\\K-Means\\Parallel\\abc.txt", "r");
+	fp = fopen("C:\\Users\\Assaf Tayouri\\Documents\\Visual Studio 2015\\Projects\\K-Means\\abc.txt", "r");
 	fscanf(fp, "%d %d %d %lf %d %lf\n", points_amount, &clusters_amount, t, dt, limit, qm);
 
 	points->size = *points_amount;
@@ -186,7 +258,7 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 
 	new_cluster = (Cluster*)calloc(clusters_amount, sizeof(Cluster));
 
-	for (int i = 0; i < *points_amount; i++)//parallel with critical
+	for (int i = 0; i < *points_amount; i++)//cant omp
 	{
 		fscanf(fp, "%lf %lf %lf %lf %lf %lf\n", &pos_x, &pos_y, &pos_z, &vel_x, &vel_y, &vel_z);
 
@@ -211,7 +283,6 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 			new_cluster[i].center.z = pos_z;
 		}
 	}
-
 	fclose(fp);
 	return new_cluster;
 }
@@ -226,7 +297,6 @@ void broadcast_flag(int* flag)
 	MPI_Bcast(flag, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
 }
 
-
 int master_calculate_points_positions(Points* points, double t, int num_of_proc, MPI_Datatype point_type, cudaDeviceProp device_prop)
 {
 	int leftover;
@@ -238,29 +308,11 @@ int master_calculate_points_positions(Points* points, double t, int num_of_proc,
 
 	int flag = CALCULATE_POINTS_FLAG;
 
-	int myid;
-	MPI_Comm_rank(MPI_COMM_WORLD, &myid);
-
 	broadcast_flag(&flag);
-
 	amount_with_lefover = check_amounts_leftover(&amount_each_element, points->size, num_of_proc, &leftover);
-
 	broadcast_time(&t);
 	points_arr = scater_points(point_type, amount_each_element, points->points);
-
 	realloc_lefover_points(leftover, &points_arr, amount_with_lefover, points);
-	/*if (leftover > 0)
-	{
-
-	points_arr =(Point*) realloc(points_arr, sizeof(Point)*amount_with_lefover);//realloc freed
-
-	#pragma omp parallel for shared(points, points_arr)
-	for (int i = leftover; i > 0; i--)//omp
-	{
-	points_arr[amount_with_lefover - i] = points->points[points->size - i];
-	}
-	}*/
-
 	good = parallel_calculate_points_location(points_arr, amount_with_lefover, device_prop, t);
 
 	if (good == 0)
@@ -269,25 +321,13 @@ int master_calculate_points_positions(Points* points, double t, int num_of_proc,
 	}
 
 	points_recv_buffer = (Point*)calloc(points->size, sizeof(Point));//realloc shouldnt free
-
 	gather_points(point_type, amount_each_element, points_arr, points_recv_buffer);
-
 	copy_lefover_points(leftover, points_recv_buffer, points_arr, points, amount_with_lefover);
-
-	/*if (leftover > 0)
-	{
-	#pragma omp parallel for shared(points_recv_buffer, points_arr)
-	for (int i = leftover; i > 0; i--)//omp
-	{
-	points_recv_buffer[points->size -i] = points_arr[amount_with_lefover - i];
-	}
-	}*/
-
-	print_points(points_recv_buffer, points->size, myid);
-
 	free_point_array(points->points);
 	free_point_array(points_arr);
 	points->points = points_recv_buffer;
+
+	return 1;
 }
 
 int slave_calculate_points_positions(MPI_Datatype point_type, int amount, cudaDeviceProp device_prop)
@@ -339,21 +379,17 @@ void realloc_lefover_points(int leftover, Point** points_arr, int amount_with_le
 {
 	if (leftover > 0)
 	{
-
 		*points_arr = (Point*)realloc(*points_arr, sizeof(Point)*amount_with_lefover);//realloc freed
-
 #pragma omp parallel for shared(points, points_arr)
-		for (int i = leftover; i > 0; i--)//omp
+		for (int i = leftover; i > 0; i--)
 		{
-			*points_arr[amount_with_lefover - i] = points->points[points->size - i];
+			(*points_arr)[amount_with_lefover - i] = points->points[points->size - i];
 		}
 	}
 }
 
 int parallel_calculate_points_location(Point* points_arr, int amount, cudaDeviceProp device_prop, double t)
 {
-	int myid;
-	MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 	Point* cuda_points;
 	Point* cuda_points_leftover;
 
@@ -363,24 +399,23 @@ int parallel_calculate_points_location(Point* points_arr, int amount, cudaDevice
 	int amount_omp = amount / 2;
 	int amount_cuda = amount_omp + (amount % 2);
 
+	//printf("%d %d %d\n", amount, amount_omp, amount_cuda);
+	//fflush(stdout);
 	Point* omp_offset = points_arr + amount_cuda;
-
 	good = cuda_start_points_location_calculation(points_arr, amount_cuda, device_prop, &cuda_points, &cuda_points_amount, &cuda_points_leftover, &cuda_points_leftover_amount, t);
 
 #pragma omp parallel for shared(omp_offset)
 	for (int i = 0; i < amount_omp; i++)
 	{
 		calculate_point_position(omp_offset + i, t);
-		printf("id [%d] in omp in core:%d point: %d\n", myid, omp_get_thread_num(), omp_offset[i].id);
-		fflush(stdout);
 	}
-
+	
 	if (good == 0)
 	{
 		return 0;
 	}
+	
 	good = cuda_end_points_location_calculation(points_arr, cuda_points, cuda_points_amount, cuda_points_leftover, cuda_points_leftover_amount);
-
 	if (good == 0)
 	{
 		return 0;
@@ -390,30 +425,23 @@ int parallel_calculate_points_location(Point* points_arr, int amount, cudaDevice
 
 int cuda_start_points_location_calculation(Point* points, int amount, cudaDeviceProp device_prop, Point** cuda_points, int* amount_cuda_points, Point** cuda_points_leftover, int* amount_cuda_points_leftover, double t)
 {
-
 	int thread_per_block;
 	int req_blocks;
 	int leftover_threads;
 	int leftover_block;
 
 	int good;
-
 	good = cuda_blocks_calculation(&thread_per_block, &req_blocks, &leftover_threads, &leftover_block, device_prop, amount);
-
 	if (good == 0)
 	{
-		printf("exit 1 [%d]", my_id);
 		return 0;
 	}
 
 	*amount_cuda_points = thread_per_block * req_blocks;
 	*amount_cuda_points_leftover = leftover_threads * leftover_block;
-
 	good = cuda_malloc_elements((void**)cuda_points, *amount_cuda_points, (void**)cuda_points_leftover, *amount_cuda_points_leftover, sizeof(Point));
-
 	if (good == 0)
 	{
-		printf("exit 2 [%d]", my_id);
 		return 0;
 	}
 
@@ -424,15 +452,13 @@ int cuda_start_points_location_calculation(Point* points, int amount, cudaDevice
 
 	if (good == 0)
 	{
-		printf("exit 3 [%d]", my_id);
 		return 0;
 	}
 
 	good = cuda_kernel_points_calculation(*cuda_points, *cuda_points_leftover, thread_per_block, req_blocks, leftover_threads, leftover_block, t);
-
+	
 	if (good == 0)
 	{
-		printf("exit 4 [%d]", my_id);
 		return 0;
 	}
 }
@@ -455,6 +481,9 @@ int cuda_end_points_location_calculation(Point * points, Point * cuda_points, in
 	{
 		return 0;
 	}
+
+	cudaFree(cuda_points);
+	cudaFree(cuda_points_leftover);
 
 	return 1;
 }
@@ -486,7 +515,6 @@ void calculate_point_position(Point* point, double t)
 	point->axis_location.z = current_position.z + t*current_velocity.z;
 }
 
-
 int master_group_points_to_clusters(Points* points, Cluster* new_cluster, int cluster_amount, MPI_Datatype axis_type,int num_of_proc,MPI_Datatype point_type, cudaDeviceProp device_prop)//
 {
 	int buffer_size = sizeof(Axis)*cluster_amount + sizeof(int);
@@ -501,14 +529,15 @@ int master_group_points_to_clusters(Points* points, Cluster* new_cluster, int cl
 
 	Axis* clusters_center = (Axis*)calloc(cluster_amount, sizeof(Axis));//freed
 
-	for (int i = 0; i < cluster_amount; i++)//omp
+#pragma omp parallel for shared(clusters_center,new_cluster)
+	for (int i = 0; i < cluster_amount; i++)
 	{
 		clusters_center[i] = new_cluster[i].center;
 	}
 
 	pack_elements(&position, buffer, buffer_size, &cluster_amount, 1, MPI_INT);
 	pack_elements(&position, buffer, buffer_size, clusters_center, cluster_amount, axis_type);
-
+	
 	broadcast_flag(&flag);
 
 	broadcast_value(&buffer_size, 1, MPI_INT);
@@ -523,21 +552,24 @@ int master_group_points_to_clusters(Points* points, Cluster* new_cluster, int cl
 	realloc_lefover_points(leftover, &points_arr, amount_with_lefover, points);
 
 	cluster_parallel = group_points_to_clusters(clusters_center, cluster_amount, points_arr, amount_with_lefover,device_prop);
-
+	
 	if (cluster_parallel == 0)
 	{
 		return 0;
 	}
 
-	for (int i = 0; i < cluster_amount; i++)//omp
+#pragma omp parallel for shared(new_cluster)
+	for (int i = 0; i < cluster_amount; i++)
 	{
 		if (new_cluster[i].size > 0)
 		{
 			free(new_cluster[i].cluster_points);
 		}
-
-		new_cluster[i].cluster_points = (Point*)calloc(points->size, sizeof(Point));
-		new_cluster[i].size = 0;
+#pragma omp critical
+		{
+			new_cluster[i].cluster_points = (Point*)calloc(points->size, sizeof(Point));
+			new_cluster[i].size = 0;
+		}
 
 		int size = cluster_parallel[i].size;
 		for (int j = 0; j < size; j++)//copy points by value to original current cluster in new_cluster array
@@ -548,10 +580,11 @@ int master_group_points_to_clusters(Points* points, Cluster* new_cluster, int cl
 
 		free(cluster_parallel[i].cluster_points);
 	}
-
+	
 	recieve_points_from_slaves(new_cluster, cluster_amount,num_of_proc,point_type);
+	
 	shrink_clusters_points(new_cluster, cluster_amount);
-
+	
 	free(clusters_center);
 	free(cluster_parallel);
 	free(buffer);
@@ -573,6 +606,11 @@ int slave_group_points_to_clusters(MPI_Datatype axis_type, MPI_Datatype point_ty
 	Point* points_arr;//freed
 	Cluster_Parallel* cluster_parallel;//freed
 
+	int total_size_buffer;
+	char* p_buffer;//freed
+	int* cluster_points_amount_arr;//freed
+	int* cluster_points_offset_arr;//freed
+
 	broadcast_value(&buffer_size, 1, MPI_INT);
 
 	buffer = (char*)calloc(buffer_size, sizeof(char));
@@ -590,48 +628,62 @@ int slave_group_points_to_clusters(MPI_Datatype axis_type, MPI_Datatype point_ty
 
 	cluster_parallel = group_points_to_clusters(clusters_center, cluster_amount, points_arr, amount_each_element, device_prop);
 
-	send_elements(&my_id, 1, MPI_INT, MASTER, MPI_ANY_TAG);
+	send_elements(&my_id, 1, MPI_INT, MASTER, 0);
 	
-	int position;
-	int points_amount;
-	int size_buffer;
-	char* p_buffer;//freed
-	for (int i = 0; i < cluster_amount; i++)//omp
+	total_size_buffer = sizeof(int)*cluster_amount*2;
+	total_size_buffer += sizeof(Point)*amount_each_element;
+	cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));
+	cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));
+
+#pragma omp parallel for shared(cluster_points_amount_arr,cluster_parallel)
+	for (int i = 0; i < cluster_amount; i++)
 	{
-		position = 0;
-		points_amount = cluster_parallel[i].size;
-		size_buffer = points_amount * sizeof(Point) + sizeof(int);
-
-		send_elements(&size_buffer, 1, MPI_INT, MASTER, i);
-
-		p_buffer = (char*)calloc(size_buffer, sizeof(char));//critical
-
-		pack_elements(&position, p_buffer, size_buffer, &points_amount, 1, MPI_INT);
-		pack_elements(&position, p_buffer, size_buffer, cluster_parallel[i].cluster_points, points_amount, point_type);
-
-		send_elements(p_buffer, size_buffer, MPI_PACKED, MASTER, i);
-
-		free(cluster_parallel[i].cluster_points);
-		free(p_buffer);
+		cluster_points_amount_arr[i] = cluster_parallel[i].size;
 	}
+
+	prepare_for_pack_elements(cluster_points_amount_arr, cluster_points_offset_arr, cluster_amount);
+
+	/*for (int i = 0; i < cluster_amount; i++)//cant omp
+	{
+		if (i == 0)
+		{
+			cluster_points_offset_arr[i] = 0;
+		}
+		else
+		{
+			for (int j = 0; j < i; j++)
+			{
+				cluster_points_offset_arr[i] += cluster_points_amount_arr[j];
+			}
+		}
+	}*/
+
+	p_buffer = (char*)calloc(total_size_buffer, sizeof(char));
+
+	position = 0;
+
+	pack_elements(&position, p_buffer, total_size_buffer, cluster_points_amount_arr, cluster_amount, MPI_INT);//
+	pack_elements(&position, p_buffer, total_size_buffer, cluster_points_offset_arr, cluster_amount, MPI_INT);//
+
+#pragma omp parallel for shared(cluster_parallel,cluster_points_offset_arr,p_buffer,total_size_buffer)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		int points_amount = cluster_parallel[i].size;
+		int current_position = position + cluster_points_offset_arr[i]*sizeof(Point);
+		pack_elements(&current_position, p_buffer, total_size_buffer, cluster_parallel[i].cluster_points, points_amount, point_type);
+		free(cluster_parallel[i].cluster_points);
+	}
+
+	send_elements(&total_size_buffer, 1, MPI_INT, MASTER, 0);
+	send_elements(p_buffer, total_size_buffer, MPI_PACKED, MASTER, 0);
 
 	free(buffer);
 	free(cluster_parallel);
 	free(clusters_center);
 	free(points_arr);
-
-
-
-
-
-	/*for (int i = 0; i < cluster_amount; i++)
-	{
-		printf("myid :[%d] cluster center x:%lf y:%lf z:%lf\n", my_id, clusters_center[i].x, clusters_center[i].y, clusters_center[i].z);
-		fflush(stdout);
-	}
-
-	printf("myid :[%d] buffer_size %d cluster_amount %d max_points_amount %d \n", my_id, buffer_size, cluster_amount, max_points_amount);
-	fflush(stdout);*/
+	free(p_buffer);
+	free(cluster_points_amount_arr);
+	free(cluster_points_offset_arr);
 
 	return 1;
 }
@@ -666,11 +718,16 @@ Cluster_Parallel* init_cluster_parallel(int cluster_amount, int points_amount)
 {
 	Cluster_Parallel* cluster_parallel_arr = (Cluster_Parallel*)calloc(cluster_amount, sizeof(Cluster_Parallel));
 
-	for (int i = 0; i < cluster_amount; i++)//omp
+	#pragma omp parallel for shared(cluster_parallel_arr,points_amount)
+	for (int i = 0; i < cluster_amount; i++)
 	{
 		cluster_parallel_arr[i].size = 0;
-		cluster_parallel_arr[i].cluster_points = (Point*)calloc(points_amount, sizeof(Point));//critical ?
+	#pragma omp critical
+		{
+			cluster_parallel_arr[i].cluster_points = (Point*)calloc(points_amount, sizeof(Point));
+		}
 	}
+	return cluster_parallel_arr;
 }
 
 int* cuda_group_points_to_clusters(Point* points,int points_amount,Axis* clusters_center_axis, int cluster_amount, cudaDeviceProp device_prop)
@@ -759,56 +816,232 @@ void recieve_points_from_slaves(Cluster* new_cluster,int clusters_amount, int nu
 	int proc = num_of_proc - 1;
 	int current_proc;
 
-	while (proc > 0)//maybe omp
+	while (proc > 0)
 	{
-		recieve_elements(&current_proc, 1, MPI_INT, MPI_ANY_SOURCE,MPI_ANY_TAG);
 
+		recieve_elements(&current_proc, 1, MPI_INT, MPI_ANY_SOURCE,MPI_ANY_TAG);
 		unpack_clusters_points_from_slaves(new_cluster, clusters_amount, point_type, current_proc);
+		proc--;
 	}
 }
 
 void unpack_clusters_points_from_slaves(Cluster* new_cluster, int cluster_amount,MPI_Datatype point_type,int src)
 {
-	int position;
+	int position = 0;
 	int points_amount;
 	int buffer_size;
+	int current_position;
 	char* buffer;//freed
-	Point* points;
-	for (int i = 0; i < cluster_amount; i++)//omp
+	int start_offset;
+	Point* points_offset;
+	int* cluster_points_amount_arr;//freed
+	int* cluster_points_offset_arr;//freed
+	
+	recieve_elements(&buffer_size, 1, MPI_INT, src,0);
+
+	buffer = (char*)calloc(buffer_size, sizeof(char));
+	cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));
+	cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));
+
+	recieve_elements(buffer, buffer_size, MPI_PACKED, src, 0);
+
+	unpack_elements(&position, buffer, buffer_size, cluster_points_amount_arr, cluster_amount, MPI_INT);
+
+	unpack_elements(&position, buffer, buffer_size, cluster_points_offset_arr, cluster_amount, MPI_INT);
+
+#pragma omp parallel for shared(position, buffer,buffer_size,cluster_points_offset_arr,cluster_points_amount_arr) private(points_amount,start_offset,points_offset,current_position)
+	for (int i = 0; i < cluster_amount; i++)
 	{
-		position = 0;
-		recieve_elements(&buffer_size, 1, MPI_INT, src,i);
+			points_amount = cluster_points_amount_arr[i];
+			if (points_amount != 0)
+			{
+				start_offset = new_cluster[i].size;
 
-		buffer = (char*)calloc(buffer_size, sizeof(char));
+				points_offset = new_cluster[i].cluster_points + start_offset;
 
-		recieve_elements(&buffer, buffer_size, MPI_PACKED, src,i);
+				current_position = position + cluster_points_offset_arr[i]*sizeof(Point);
 
-		unpack_elements(&position, buffer, buffer_size, &points_amount, 1, MPI_INT);
-		
-		if (points_amount != 0)
-		{
-			int start_offset = new_cluster[i].size;
+				unpack_elements(&current_position, buffer, buffer_size, points_offset, points_amount, point_type);
 
-			Point* points_offset = new_cluster[i].cluster_points + start_offset;
-
-			unpack_elements(&position, buffer, buffer_size, points_offset, points_amount, point_type);
-			
-			new_cluster[i].size += points_amount;
-
-		}
-
-		free(buffer);
+				new_cluster[i].size += points_amount;
+			}
 	}
+
+	free(cluster_points_amount_arr);
+	free(cluster_points_offset_arr);
+	free(buffer);
 }
 
 void shrink_clusters_points(Cluster* new_cluster, int clusters_amount)
 {
-	for (int i = 0; i < clusters_amount; i++)//omp
+#pragma omp parallel for shared(new_cluster)//may produce error because realloc
+	for (int i = 0; i < clusters_amount; i++)
 	{
 		new_cluster[i].cluster_points = (Point*)realloc(new_cluster[i].cluster_points, sizeof(Point)*new_cluster[i].size);
 	}
 }
 
+void calculate_cluster_center(Cluster* new_cluster, Clusters* clusters, int amount)
+{
+#pragma omp parallel for shared(new_cluster,clusters)
+	for (int i = 0; i < amount; i++)
+	{
+		//printf("%d\n", omp_get_thread_num());
+		//fflush(stdout);
+		if (new_cluster[i].size > 0)
+		{
+			new_cluster[i].center = axis_avg(new_cluster[i].cluster_points, new_cluster[i].size);
+		}
+		else
+		{
+			new_cluster[i].center = clusters->clusters[i].center;
+		}
+	}
+}
+
+Axis axis_avg(Point* points, int amount)
+{
+	double sum_x = 0, sum_y = 0, sum_z = 0;
+	Axis center_axis;
+
+	for (int i = 0; i < amount; i++)//maybe omp
+	{
+		Point* p = (points + i);
+		sum_x += p->axis_location.x;
+		sum_y += p->axis_location.y;
+		sum_z += p->axis_location.z;
+	}
+
+	center_axis.x = sum_x / amount;
+	center_axis.y = sum_y / amount;
+	center_axis.z = sum_z / amount;
+	return center_axis;
+}
+
+int master_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster, int cluster_amount,int points_amount,int num_of_proc, cudaDeviceProp device_prop)
+{
+	int* cluster_points_amount_arr;//should free
+	int* cluster_points_offset_arr;//should free
+	char* buffer;//should free
+	int buffer_size;
+	int flag = CHECK_TRANSFER_POINTS;
+	int amount_each_element;
+	int amount_leftover_element;
+
+	/*if (pre_check_points_transfer(original_cluster, new_cluster, cluster_amount) > 0)
+	{
+		return 1;
+	}*/
+
+	cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));
+	cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));
+	buffer_size = points_amount * sizeof(int);
+	buffer = (char*)calloc(buffer_size,sizeof(char));
+
+#pragma omp parallel for shared(cluster_points_amount_arr,original_cluster)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		cluster_points_amount_arr[i] = original_cluster[i].size;
+	}
+
+	prepare_for_pack_elements(cluster_points_amount_arr, cluster_points_offset_arr, cluster_amount);
+
+#pragma omp parallel for shared(cluster_points_offset_arr,original_cluster,buffer,buffer_size)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		
+		int current_position = cluster_points_offset_arr[i]*sizeof(int);
+		int count = 0;
+		for (int j = 0; j < original_cluster[i].size; j++)
+		{
+			Point* point = (original_cluster[i].cluster_points + count);
+			
+			pack_elements(&current_position, buffer, buffer_size, &(point->id), 1, MPI_INT);
+			count++;
+		}
+	}
+
+	check_amounts_leftover(&amount_each_element, points_amount, num_of_proc, &amount_leftover_element);
+	//handle special elments cluster_index--point_id **make new struct 
+
+
+	broadcast_flag(&flag);
+
+	broadcast_value(&cluster_amount,1,MPI_INT);
+	broadcast_value(&cluster_points_amount_arr, cluster_amount, MPI_INT);
+	broadcast_value(&cluster_points_offset_arr, cluster_amount, MPI_INT);
+	broadcast_value(&buffer_size, 1, MPI_INT);
+	broadcast_value(buffer, buffer_size, MPI_INT);
+	broadcast_value(&amount_each_element, 1, MPI_INT);
+	
+	//scater special elments
+
+
+
+
+	return 0;//change
+}
+int slave_check_points_transfer(cudaDeviceProp device_prop)
+{
+	int cluster_amount;
+	int buffer_size;
+	int amount_each_element;
+	int* cluster_points_amount_arr;
+	int* cluster_points_offset_arr;
+	int* points_id;
+	char* buffer;
+
+	broadcast_value(&cluster_amount, 1, MPI_INT);
+
+	cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));
+	cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));
+	broadcast_value(&cluster_points_amount_arr, cluster_amount, MPI_INT);
+	broadcast_value(&cluster_points_offset_arr, cluster_amount, MPI_INT);
+
+	broadcast_value(&buffer_size, 1, MPI_INT);
+
+	buffer = (char*)calloc(buffer_size, sizeof(char));
+	broadcast_value(buffer, buffer_size, MPI_INT);
+
+	broadcast_value(&amount_each_element, 1, MPI_INT);
+
+	//scater
+}
+int pre_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster, int cluster_amount)
+{
+	int good = 0;
+#pragma omp parallel for shared(original_cluster,new_cluster) reduction (+:good)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		if (original_cluster[i].size != new_cluster[i].size)
+		{
+			good = 1;
+		}
+		else
+		{
+			good = 0;
+		}
+	}
+	
+	return good;
+}
+void prepare_for_pack_elements(int* cluster_points_amount_arr, int* cluster_points_offset_arr, int cluster_amount)
+{
+	for (int i = 0; i < cluster_amount; i++)//cant omp
+	{
+		if (i == 0)
+		{
+			cluster_points_offset_arr[i] = 0;
+		}
+		else
+		{
+			for (int j = 0; j < i; j++)
+			{
+				cluster_points_offset_arr[i] += cluster_points_amount_arr[j];
+			}
+		}
+	}
+}
 
 void print_points(Point* points, int amount,int myid)
 {
@@ -859,17 +1092,17 @@ void gather_elements(void* elements_recv_buffer, void* elements_arr, int amount_
 	MPI_Gather(elements_arr, amount_each_element, element_type, elements_recv_buffer, amount_each_element, element_type, MASTER, MPI_COMM_WORLD);
 }
 
-
-
-
 int cuda_init()
 {
+	char* dummy;
 	cudaError_t cudaStatus;
 	cudaStatus = cudaSetDevice(0);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaSetDevice failed! Do you have a CUDA-capable GPU installed?");
 		return 0;
 	}
+	cuda_malloc_memory((void**)&dummy, 1, sizeof(char));
+	cudaFree(dummy);
 	return 1;
 }
 
