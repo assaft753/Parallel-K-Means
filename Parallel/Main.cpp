@@ -67,11 +67,14 @@ int main(int argc, char **argv)
 	int myid, num_of_proc;
 	int points_amount;
 	int cuda_error;
+	int good;
 	
 	MPI_Status status;
 
 	MPI_Datatype axis_type;
 	MPI_Datatype point_type;
+	MPI_Datatype transfer_points_type;
+	MPI_Datatype qm_point_type;
 
 	cudaDeviceProp device_prop;
 	MPI_Init(&argc, &argv);
@@ -90,7 +93,7 @@ int main(int argc, char **argv)
 
 	else
 	{
-		init_structs(&axis_type, &point_type);
+		init_structs(&axis_type, &point_type, &transfer_points_type,&qm_point_type);
 
 		cuda_init_properties(&device_prop);
 
@@ -101,22 +104,61 @@ int main(int argc, char **argv)
 			Cluster* new_cluster;
 			int limit, t, i, n, max_n, good = 0;
 			double qm, dt, current_t, q;
-
+			
 			new_cluster = init_data(&points, &clusters, &limit, &qm, &t, &points_amount, &dt);
 			init_processes(&points_amount);
-
+			
 			max_n = t / dt;
-
 			start();
-			master_calculate_points_positions(&points, 0.2, num_of_proc, point_type, device_prop);//error check
-			master_group_points_to_clusters(&points, new_cluster, clusters.size, axis_type, num_of_proc, point_type, device_prop); //error check
-			calculate_cluster_center(new_cluster, &clusters, clusters.size);//can be done with mpi
-			master_check_points_transfer(new_cluster, clusters.clusters, clusters.size,points.size, device_prop);//switch clusters
+			good = master_calculate_points_positions(&points, 0, num_of_proc, point_type, device_prop);//error check
+			printf("get here2 %d\n", good);
+			fflush(stdout);
+			good = master_group_points_to_clusters(&points, new_cluster, clusters.size, axis_type, num_of_proc, point_type, device_prop); //error check
+			printf("get here2 %d\n", good);
+			fflush(stdout);
 
-			finish();
+			calculate_cluster_center(new_cluster, &clusters, clusters.size);//can be done with mpi
+			/*Point p[4];
+
+			p[0] = new_cluster[0].cluster_points[1];
+			p[1] = new_cluster[0].cluster_points[2];
+			p[2] = new_cluster[0].cluster_points[0];
+			p[3] = new_cluster[1].cluster_points[4];
+			clusters.clusters[0].cluster_points = p;
+			clusters.clusters[0].size = new_cluster[0].size;
+
+			Point p1[6];
+			p1[0] = new_cluster[1].cluster_points[0];
+			p1[1] = new_cluster[1].cluster_points[1];
+			p1[2] = new_cluster[1].cluster_points[2];
+			p1[3] = new_cluster[1].cluster_points[3];
+			p1[4] = new_cluster[0].cluster_points[3];
+			p1[5] = new_cluster[1].cluster_points[5];
+
+			clusters.clusters[1].cluster_points = p1;
+			clusters.clusters[1].size = new_cluster[1].size;
+			printf("%d!!!!!!!!!!!!!!!!!!!!!!!!\n", p1[0].id);
+			fflush(stdout);
+
+			Point p2[2];
+			p2[0] = new_cluster[2].cluster_points[1];
+			p2[1] = new_cluster[2].cluster_points[0];
+			clusters.clusters[2].cluster_points = p2;
+			clusters.clusters[2].size = new_cluster[2].size;
 			
 			print(&clusters, new_cluster, 5, points);
+			fflush(stdout);*/
+			good = master_check_points_transfer(clusters.clusters, new_cluster, clusters.size,points.size,num_of_proc,transfer_points_type, device_prop);// clusters.clusters first argument %% check if_transfered transfered = 1  || Not transfered = 0
+			printf("get here22 %d\n", good);
 			fflush(stdout);
+
+			master_evaluate_qm(new_cluster, clusters.size, points.size,num_of_proc, axis_type, qm_point_type);
+			printf("get here23 %d\n", good);
+			fflush(stdout);
+			finish();
+			
+			//print(&clusters, new_cluster, 5, points);
+			//fflush(stdout);
 		
 			/*int thread_per_block;
 			int req_blocks;
@@ -125,7 +167,7 @@ int main(int argc, char **argv)
 			cuda_blocks_calculation(&thread_per_block, &req_blocks, &leftover_threads, &leftover_block, device_prop, 1000000);
 			printf("thread_per_block %d req_blocks %d leftover_threads %d leftover_block %d\n", thread_per_block, req_blocks, leftover_threads, leftover_block);
 			fflush(stdout);
-			test_cuda(my_id);*/
+			*/
 		
 		}
 
@@ -156,7 +198,11 @@ int main(int argc, char **argv)
 					break;
 				
 				case CHECK_TRANSFER_POINTS:
-					slave_check_points_transfer(device_prop);
+					slave_check_points_transfer(transfer_points_type,device_prop);
+					break;
+				
+				case EVALUATE_QM:
+					slave_evaluate_qm(axis_type,qm_point_type);
 
 				default:
 					break;
@@ -181,7 +227,7 @@ void test_cuda_omp(int myid)
 	cudaError_t cudaStatus;
 	
 	#pragma omp parallel for
-	for (int i = 0; i < 10; i++)
+	for (int i = 0; i < 1; i++)
 	{
 		//printf("core %d myid %d\n", omp_get_thread_num(),myid);
 		//fflush(stdout);
@@ -197,10 +243,12 @@ void test_cuda_omp(int myid)
 }
 
 
-void init_structs(MPI_Datatype* axis_type, MPI_Datatype* point_type)
+void init_structs(MPI_Datatype* axis_type, MPI_Datatype* point_type, MPI_Datatype* transfer_points_type, MPI_Datatype* qm_point_type)
 {
 	init_axis_struct(axis_type);
 	init_point_struct(point_type, *axis_type);
+	init_transfer_points_struct(transfer_points_type);
+	init_qm_point_struct(qm_point_type,*axis_type);
 }
 
 void init_axis_struct(MPI_Datatype* axis_type)
@@ -219,6 +267,21 @@ void init_axis_struct(MPI_Datatype* axis_type)
 	MPI_Type_commit(axis_type);
 }
 
+void init_transfer_points_struct(MPI_Datatype * transfer_points_type)
+{
+	Transfer_Point transfer_point;
+
+	MPI_Datatype type[2] = { MPI_INT, MPI_INT };
+	int blocklen[2] = { 1, 1 };
+	MPI_Aint disp[2];
+
+	disp[0] = (char *)&transfer_point.cluster_id - (char *)&transfer_point;
+	disp[1] = (char *)&transfer_point.point_id - (char *)&transfer_point;
+
+	MPI_Type_create_struct(2, blocklen, disp, type, transfer_points_type);
+	MPI_Type_commit(transfer_points_type);
+}
+
 void init_point_struct(MPI_Datatype* point_type, MPI_Datatype axis_type)
 {
 	Point point;
@@ -233,6 +296,23 @@ void init_point_struct(MPI_Datatype* point_type, MPI_Datatype axis_type)
 
 	MPI_Type_create_struct(3, blocklen, disp, type, point_type);
 	MPI_Type_commit(point_type);
+}
+
+void init_qm_point_struct(MPI_Datatype* qm_point_type, MPI_Datatype axis_type)
+{
+	Qm_Point qm_point;
+
+	MPI_Datatype type[2] = { MPI_INT, axis_type };
+	int blocklen[2] = { 1, 1 };
+	MPI_Aint disp[2];
+
+	disp[0] = (char *)&qm_point.cluster_id - (char *)&qm_point;
+	disp[1] = (char *)&qm_point.point_loc - (char *)&qm_point;
+	
+
+	MPI_Type_create_struct(2, blocklen, disp, type, qm_point_type);
+	MPI_Type_commit(qm_point_type);
+
 }
 
 void cuda_init_properties(cudaDeviceProp * device_prop)
@@ -390,8 +470,8 @@ void realloc_lefover_points(int leftover, Point** points_arr, int amount_with_le
 
 int parallel_calculate_points_location(Point* points_arr, int amount, cudaDeviceProp device_prop, double t)
 {
-	Point* cuda_points;
-	Point* cuda_points_leftover;
+	Point* cuda_points = 0;
+	Point* cuda_points_leftover = 0;
 
 	int cuda_points_amount;
 	int cuda_points_leftover_amount;
@@ -399,20 +479,19 @@ int parallel_calculate_points_location(Point* points_arr, int amount, cudaDevice
 	int amount_omp = amount / 2;
 	int amount_cuda = amount_omp + (amount % 2);
 
-	//printf("%d %d %d\n", amount, amount_omp, amount_cuda);
-	//fflush(stdout);
 	Point* omp_offset = points_arr + amount_cuda;
 	good = cuda_start_points_location_calculation(points_arr, amount_cuda, device_prop, &cuda_points, &cuda_points_amount, &cuda_points_leftover, &cuda_points_leftover_amount, t);
+	printf("%d %d\n", cuda_points, cuda_points_leftover);
+	fflush(stdout);
+	if (good == 0)
+	{
+		return 0;
+	}
 
 #pragma omp parallel for shared(omp_offset)
 	for (int i = 0; i < amount_omp; i++)
 	{
 		calculate_point_position(omp_offset + i, t);
-	}
-	
-	if (good == 0)
-	{
-		return 0;
 	}
 	
 	good = cuda_end_points_location_calculation(points_arr, cuda_points, cuda_points_amount, cuda_points_leftover, cuda_points_leftover_amount);
@@ -432,6 +511,7 @@ int cuda_start_points_location_calculation(Point* points, int amount, cudaDevice
 
 	int good;
 	good = cuda_blocks_calculation(&thread_per_block, &req_blocks, &leftover_threads, &leftover_block, device_prop, amount);
+	
 	if (good == 0)
 	{
 		return 0;
@@ -439,6 +519,7 @@ int cuda_start_points_location_calculation(Point* points, int amount, cudaDevice
 
 	*amount_cuda_points = thread_per_block * req_blocks;
 	*amount_cuda_points_leftover = leftover_threads * leftover_block;
+	
 	good = cuda_malloc_elements((void**)cuda_points, *amount_cuda_points, (void**)cuda_points_leftover, *amount_cuda_points_leftover, sizeof(Point));
 	if (good == 0)
 	{
@@ -482,9 +563,16 @@ int cuda_end_points_location_calculation(Point * points, Point * cuda_points, in
 		return 0;
 	}
 
-	cudaFree(cuda_points);
-	cudaFree(cuda_points_leftover);
-
+	cudaStatus = cudaFree(cuda_points);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+	cudaStatus = cudaFree(cuda_points_leftover);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
 	return 1;
 }
 
@@ -594,7 +682,7 @@ int master_group_points_to_clusters(Points* points, Cluster* new_cluster, int cl
 	
 }
 
-int slave_group_points_to_clusters(MPI_Datatype axis_type, MPI_Datatype point_type, cudaDeviceProp device_prop)// put in h file //
+int slave_group_points_to_clusters(MPI_Datatype axis_type, MPI_Datatype point_type, cudaDeviceProp device_prop)// !!!!!!!!!!!!
 {
 	int buffer_size;
 	int position = 0;
@@ -641,22 +729,7 @@ int slave_group_points_to_clusters(MPI_Datatype axis_type, MPI_Datatype point_ty
 		cluster_points_amount_arr[i] = cluster_parallel[i].size;
 	}
 
-	prepare_for_pack_elements(cluster_points_amount_arr, cluster_points_offset_arr, cluster_amount);
-
-	/*for (int i = 0; i < cluster_amount; i++)//cant omp
-	{
-		if (i == 0)
-		{
-			cluster_points_offset_arr[i] = 0;
-		}
-		else
-		{
-			for (int j = 0; j < i; j++)
-			{
-				cluster_points_offset_arr[i] += cluster_points_amount_arr[j];
-			}
-		}
-	}*/
+	init_cluster_points_offset(cluster_points_amount_arr, cluster_points_offset_arr, cluster_amount);
 
 	p_buffer = (char*)calloc(total_size_buffer, sizeof(char));
 
@@ -732,13 +805,13 @@ Cluster_Parallel* init_cluster_parallel(int cluster_amount, int points_amount)
 
 int* cuda_group_points_to_clusters(Point* points,int points_amount,Axis* clusters_center_axis, int cluster_amount, cudaDeviceProp device_prop)
 {
-	int* cuda_cluster_of_points;//freed
-	int* cuda_cluster_of_points_leftover;//freed
+	int* cuda_cluster_of_points = 0;//freed
+	int* cuda_cluster_of_points_leftover = 0;//freed
 	int* cluster_of_points;//shouldnt free
 	int* cluster_of_points_leftover_offset;//shouldnt free
-	Point* cuda_points;//freed
-	Point* cuda_points_leftover;//freed
-	Axis* cuda_clusters_center_axis;//freed
+	Point* cuda_points = 0;//freed
+	Point* cuda_points_leftover = 0;//freed
+	Axis* cuda_clusters_center_axis = 0;//freed
 	cudaError_t cudaStatus;
 	int thread_per_block;
 	int req_blocks;
@@ -748,10 +821,15 @@ int* cuda_group_points_to_clusters(Point* points,int points_amount,Axis* cluster
 	int amount_cuda_points_leftover;
 	int good;
 	
-	cuda_blocks_calculation(&thread_per_block, &req_blocks, &leftover_threads, &leftover_block, device_prop, points_amount);
-
+	good = cuda_blocks_calculation(&thread_per_block, &req_blocks, &leftover_threads, &leftover_block, device_prop, points_amount);
+	if (good == 0)
+	{
+		return 0;
+	}
 	amount_cuda_points = thread_per_block * req_blocks;
 	amount_cuda_points_leftover = leftover_threads * leftover_block;
+
+	
 
 	good = cuda_malloc_elements((void**)&cuda_cluster_of_points, amount_cuda_points, (void**)&cuda_cluster_of_points_leftover, amount_cuda_points_leftover, sizeof(int));
 	if (good == 0)
@@ -771,12 +849,14 @@ int* cuda_group_points_to_clusters(Point* points,int points_amount,Axis* cluster
 		return 0;
 	}
 
+	
 	Point* leftover_points_offset = points + amount_cuda_points;
 	good = cuda_copy_elements(cuda_points, points, amount_cuda_points, cuda_points_leftover, leftover_points_offset, amount_cuda_points_leftover, sizeof(Point), cudaMemcpyHostToDevice);
 	if (good == 0)
 	{
 		return 0;
 	}
+
 
 	good = cuda_copy_elements(cuda_clusters_center_axis, clusters_center_axis, cluster_amount, 0, 0, 0, sizeof(Axis), cudaMemcpyHostToDevice);
 	if (good == 0)
@@ -802,11 +882,32 @@ int* cuda_group_points_to_clusters(Point* points,int points_amount,Axis* cluster
 		return 0;
 	}
 
-	cudaFree(cuda_cluster_of_points);
-	cudaFree(cuda_cluster_of_points_leftover);
-	cudaFree(cuda_points);
-	cudaFree(cuda_points_leftover);
-	cudaFree(cuda_clusters_center_axis);
+	cudaStatus = cudaFree(cuda_cluster_of_points);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+
+	cudaStatus = cudaFree(cuda_cluster_of_points_leftover);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+	cudaStatus = cudaFree(cuda_points);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+	cudaStatus = cudaFree(cuda_points_leftover);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+	cudaStatus = cudaFree(cuda_clusters_center_axis);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
 
 	return cluster_of_points;
 }
@@ -918,95 +1019,216 @@ Axis axis_avg(Point* points, int amount)
 	return center_axis;
 }
 
-int master_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster, int cluster_amount,int points_amount,int num_of_proc, cudaDeviceProp device_prop)
+int master_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster, int cluster_amount, int points_amount, int num_of_proc, MPI_Datatype transfer_points_type, cudaDeviceProp device_prop)
 {
-	int* cluster_points_amount_arr;//should free
-	int* cluster_points_offset_arr;//should free
-	char* buffer;//should free
+	int* original_cluster_points_amount_arr = 0;//freed
+	int* original_cluster_points_offset_arr = 0;//freed
+	int* new_cluster_points_amount_arr = 0;//freed
+	int* new_cluster_points_offset_arr = 0;//freed
+	char* buffer = 0;//freed
+	Transfer_Point* transfer_points = 0;//freed
+	Transfer_Point* transfer_points_per_element = 0;//freed
+	int* is_transfered_arr = 0;//freed
+	int** points_id = 0;//freed
 	int buffer_size;
 	int flag = CHECK_TRANSFER_POINTS;
 	int amount_each_element;
 	int amount_leftover_element;
+	int amount_each_element_with_leftover;
+	int is_transfered;
 
-	/*if (pre_check_points_transfer(original_cluster, new_cluster, cluster_amount) > 0)
+	
+	
+	if (pre_check_points_transfer(original_cluster, new_cluster, cluster_amount) > 0)
 	{
 		return 1;
-	}*/
-
-	cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));
-	cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));
-	buffer_size = points_amount * sizeof(int);
-	buffer = (char*)calloc(buffer_size,sizeof(char));
-
-#pragma omp parallel for shared(cluster_points_amount_arr,original_cluster)
-	for (int i = 0; i < cluster_amount; i++)
-	{
-		cluster_points_amount_arr[i] = original_cluster[i].size;
 	}
 
-	prepare_for_pack_elements(cluster_points_amount_arr, cluster_points_offset_arr, cluster_amount);
+	transfer_points = (Transfer_Point*)calloc(points_amount, sizeof(Transfer_Point));
+	
+	is_transfered_arr = (int*)calloc(num_of_proc, sizeof(int));
 
-#pragma omp parallel for shared(cluster_points_offset_arr,original_cluster,buffer,buffer_size)
+	//original_cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));//
+	//original_cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));//
+	
+	//new_cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));//
+	//new_cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));//
+
+	//buffer_size = points_amount * sizeof(int);//
+	//buffer = (char*)calloc(buffer_size,sizeof(char));//
+
+/*#pragma omp parallel for shared(original_cluster_points_amount_arr,new_cluster_points_amount_arr,original_cluster)
 	for (int i = 0; i < cluster_amount; i++)
 	{
-		
-		int current_position = cluster_points_offset_arr[i]*sizeof(int);
-		int count = 0;
+		original_cluster_points_amount_arr[i] = original_cluster[i].size;
+		new_cluster_points_amount_arr[i] = new_cluster[i].size;
+	}*/
+
+	buffer = malloc_packed_buffer(points_amount,sizeof(int),&buffer_size);
+
+	prepare_for_pack_elements(original_cluster,&original_cluster_points_amount_arr, &original_cluster_points_offset_arr, cluster_amount);
+	prepare_for_pack_elements(new_cluster,&new_cluster_points_amount_arr, &new_cluster_points_offset_arr, cluster_amount);
+	
+	points_id = malloc_points_id(cluster_amount, original_cluster_points_amount_arr);
+
+#pragma omp parallel for shared(original_cluster_points_offset_arr,original_cluster,buffer,buffer_size)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		int current_position = original_cluster_points_offset_arr[i]*sizeof(int);
 		for (int j = 0; j < original_cluster[i].size; j++)
 		{
-			Point* point = (original_cluster[i].cluster_points + count);
-			
+			Point* point = (original_cluster[i].cluster_points + j);
+			points_id[i][j] = point->id;
 			pack_elements(&current_position, buffer, buffer_size, &(point->id), 1, MPI_INT);
-			count++;
 		}
 	}
 
 	check_amounts_leftover(&amount_each_element, points_amount, num_of_proc, &amount_leftover_element);
-	//handle special elments cluster_index--point_id **make new struct 
+	amount_each_element_with_leftover = amount_each_element + amount_leftover_element;
 
+	//handle special elments cluster_index--point_id **make new struct 
+#pragma omp parallel for shared(new_cluster_points_amount_arr,new_cluster_points_offset_arr,transfer_points,new_cluster)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		int p_amount = new_cluster_points_amount_arr[i];
+		int p_offset = new_cluster_points_offset_arr[i];
+
+		for (int j = 0; j < p_amount; j++)
+		{
+			Point* p = (new_cluster[i].cluster_points +j);
+			*(transfer_points + p_offset + j) = Transfer_Point{ i,p->id };
+		}
+	}
+
+	/*for (int i = 0; i < points_amount; i++)//can delete
+	{
+		printf("cluster_id %d point_id %d\n", transfer_points[i].cluster_id, transfer_points[i].point_id);
+		fflush(stdout);
+	}*/
 
 	broadcast_flag(&flag);
-
 	broadcast_value(&cluster_amount,1,MPI_INT);
-	broadcast_value(&cluster_points_amount_arr, cluster_amount, MPI_INT);
-	broadcast_value(&cluster_points_offset_arr, cluster_amount, MPI_INT);
+	broadcast_value(original_cluster_points_amount_arr, cluster_amount, MPI_INT);
+	broadcast_value(original_cluster_points_offset_arr, cluster_amount, MPI_INT);
 	broadcast_value(&buffer_size, 1, MPI_INT);
-	broadcast_value(buffer, buffer_size, MPI_INT);
+	broadcast_value(buffer, buffer_size, MPI_PACKED);
 	broadcast_value(&amount_each_element, 1, MPI_INT);
 	
 	//scater special elments
+	transfer_points_per_element = (Transfer_Point*) scater_elements(transfer_points, amount_each_element, sizeof(Transfer_Point), transfer_points_type);
+
+	realloc_lefover_transfer_point(amount_leftover_element, &transfer_points_per_element, amount_each_element_with_leftover, transfer_points, points_amount);
+	
+	is_transfered = check_points_transfer(points_id,cluster_amount, original_cluster_points_amount_arr,transfer_points_per_element,amount_each_element_with_leftover,device_prop);
+	
+	if (is_transfered == -1)
+	{
+		return -1;
+	}
+
+	is_transfered = is_transfered != 0;
+
+	//recieve answers from slaves
+	gather_elements(is_transfered_arr, &is_transfered, 1, MPI_INT);
+
+#pragma omp parallel for shared(is_transfered, is_transfered_arr)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		if (is_transfered_arr[i] == 1)
+		{
+			is_transfered = 1;
+		}
+	}
+	
+	free(original_cluster_points_amount_arr);
+	free(original_cluster_points_offset_arr);
+	free(new_cluster_points_amount_arr);
+	free(new_cluster_points_offset_arr);
+	free(buffer);
+	free(transfer_points);
+	free(transfer_points_per_element);
+	free(is_transfered_arr);
+	free_points_id(points_id, cluster_amount);
 
 
-
-
-	return 0;//change
+	return is_transfered;
 }
-int slave_check_points_transfer(cudaDeviceProp device_prop)
+int slave_check_points_transfer(MPI_Datatype transfer_points_type,cudaDeviceProp device_prop)
 {
 	int cluster_amount;
 	int buffer_size;
 	int amount_each_element;
-	int* cluster_points_amount_arr;
-	int* cluster_points_offset_arr;
-	int* points_id;
-	char* buffer;
+	int is_transfered;
+	int* cluster_points_amount_arr;//freed
+	int* cluster_points_offset_arr;//freed
+	int** points_id;//freed
+	char* buffer;//freed
+	Transfer_Point* transfer_points_per_element;//freed
 
 	broadcast_value(&cluster_amount, 1, MPI_INT);
 
 	cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));
 	cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));
-	broadcast_value(&cluster_points_amount_arr, cluster_amount, MPI_INT);
-	broadcast_value(&cluster_points_offset_arr, cluster_amount, MPI_INT);
+	broadcast_value(cluster_points_amount_arr, cluster_amount, MPI_INT);
+	broadcast_value(cluster_points_offset_arr, cluster_amount, MPI_INT);
+	
+	/*for (int i = 0; i < cluster_amount; i++)//can delete
+	{
+	printf("cluster_amount %d cluster_offset %d\n", cluster_points_amount_arr[i], cluster_points_offset_arr[i]);
+	fflush(stdout);
+	}*/
 
 	broadcast_value(&buffer_size, 1, MPI_INT);
 
 	buffer = (char*)calloc(buffer_size, sizeof(char));
-	broadcast_value(buffer, buffer_size, MPI_INT);
-
+	broadcast_value(buffer, buffer_size, MPI_PACKED);
+	
 	broadcast_value(&amount_each_element, 1, MPI_INT);
 
-	//scater
+	transfer_points_per_element = (Transfer_Point*) scater_elements(0, amount_each_element, sizeof(Transfer_Point), transfer_points_type);
+	
+	points_id = malloc_points_id(cluster_amount, cluster_points_amount_arr);
+	
+
+#pragma omp parallel for shared(cluster_points_offset_arr,cluster_points_amount_arr,buffer,buffer_size)
+	for (int i = 0; i < cluster_amount; i++)//might be merge with upper for loop
+	{
+		int current_position = cluster_points_offset_arr[i]*sizeof(int);
+		int points_amount = cluster_points_amount_arr[i];
+		unpack_elements(&current_position, buffer, buffer_size, points_id[i], points_amount, MPI_INT);
+	}
+
+	/*for (int i = 0; i < cluster_amount; i++)//can delete
+	{
+		for (int j = 0; j < cluster_points_amount_arr[i]; j++)
+		{
+			printf("point_id %d my_id %d cluster %d\n", points_id[i][j], my_id,i);
+			fflush(stdout);
+		}
+	}*/
+
+	
+
+	is_transfered = check_points_transfer(points_id,cluster_amount, cluster_points_amount_arr, transfer_points_per_element,amount_each_element,device_prop);
+
+	if (is_transfered == -1)
+	{
+		return 0;
+	}
+
+	is_transfered = is_transfered != 0;
+
+	gather_elements(0, &is_transfered, 1, MPI_INT);
+
+	free(cluster_points_amount_arr);
+	free(cluster_points_offset_arr);
+	free(buffer);
+	free(transfer_points_per_element);
+	free_points_id(points_id, cluster_amount);
+
+	return 1;
 }
+
 int pre_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster, int cluster_amount)
 {
 	int good = 0;
@@ -1025,22 +1247,605 @@ int pre_check_points_transfer(Cluster * original_cluster, Cluster * new_cluster,
 	
 	return good;
 }
-void prepare_for_pack_elements(int* cluster_points_amount_arr, int* cluster_points_offset_arr, int cluster_amount)
+void prepare_for_pack_elements(Cluster* clusters,int** cluster_points_amount_arr, int** cluster_points_offset_arr, int cluster_amount)
+{
+	*cluster_points_amount_arr = (int*)calloc(cluster_amount, sizeof(int));//
+	*cluster_points_offset_arr = (int*)calloc(cluster_amount, sizeof(int));//
+
+#pragma omp parallel for shared(clusters,cluster_points_amount_arr)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		cluster_points_amount_arr[0][i] = clusters[i].size;//
+	}
+
+	init_cluster_points_offset(*cluster_points_amount_arr, *cluster_points_offset_arr, cluster_amount);
+
+}
+
+void init_cluster_points_offset(int* cluster_points_amount_arr, int* cluster_points_offset_arr, int cluster_amount)
 {
 	for (int i = 0; i < cluster_amount; i++)//cant omp
 	{
 		if (i == 0)
 		{
-			cluster_points_offset_arr[i] = 0;
+			cluster_points_offset_arr[i] = 0;///
 		}
 		else
 		{
 			for (int j = 0; j < i; j++)
 			{
-				cluster_points_offset_arr[i] += cluster_points_amount_arr[j];
+				cluster_points_offset_arr[i] += cluster_points_amount_arr[j];///
 			}
 		}
 	}
+}
+
+char* malloc_packed_buffer(int amount, int size_of,int* buffer_size) {
+	char* buffer;
+	*buffer_size = amount * size_of;
+	buffer = (char*)calloc(*buffer_size, sizeof(char));
+	return buffer;
+}
+
+int** malloc_points_id(int cluster_amount,int* cluster_points_amount_arr)
+{
+	int** points_id;
+	points_id = (int**)calloc(cluster_amount, sizeof(int*));
+
+	for (int i = 0; i < cluster_amount; i++)//cant omp because calloc
+	{
+		points_id[i] = (int*)calloc(cluster_points_amount_arr[i], sizeof(int));
+	}
+
+	return points_id;
+}
+
+void free_points_id(int** points_id,int cluster_amount)
+{
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		free(points_id[i]);
+	}
+
+	free(points_id);
+}
+
+int check_points_transfer(int** points_id, int cluster_amount, int* cluster_points_amount, Transfer_Point* transfer_points, int amount, cudaDeviceProp device_prop)
+{
+	int thread_per_block;
+	int req_block;
+	int leftover_threads;
+	int leftover_block;
+	int* cuda_result_pointer = 0;//freed
+	int result_of_cuda;
+	int result_of_omp = 0;
+	int amount_omp = amount / 2;
+	int amount_cuda = amount_omp + (amount % 2);
+	int good;
+	int** cuda_points_id = 0;//freed
+	int* cuda_cluster_points_amount = 0;//freed
+	int** cuda_points_id_arr_pointers = 0;//freed
+	Transfer_Point* cuda_transfer_points = 0;//freed
+	Transfer_Point* cuda_transfer_points_leftover = 0;//freed
+	Transfer_Point* omp_offset = transfer_points + amount_cuda;//shouldnt free
+
+	cuda_points_id_arr_pointers = (int**)calloc(cluster_amount, sizeof(int*));
+
+	good = cuda_blocks_calculation(&thread_per_block, &req_block, &leftover_threads, &leftover_block, device_prop, amount_cuda);
+	if (good == 0)
+	{
+		return -1;
+	}
+
+	good = cuda_start_check_points_transfer(points_id, cluster_amount, cluster_points_amount, &cuda_cluster_points_amount, cuda_points_id_arr_pointers, transfer_points, &cuda_result_pointer, &cuda_points_id, &cuda_transfer_points, &cuda_transfer_points_leftover, thread_per_block, req_block, leftover_threads, leftover_block);
+	if (good == 0)
+	{
+		return -1;
+	}
+
+	//omp loop
+	result_of_omp = 0;
+#pragma omp parallel for shared(omp_offset,points_id,cluster_points_amount) reduction (+:result_of_omp)
+	for (int i = 0; i < amount_omp; i++)
+	{
+		Transfer_Point* current_transfer_point = omp_offset+i;
+		int cluster_id = current_transfer_point->cluster_id;
+		int point_id = current_transfer_point->point_id;
+		result_of_omp = !(check_exists_points_transfer(points_id[cluster_id], cluster_points_amount[cluster_id], point_id) == 1);
+		if (result_of_omp == 1)
+		{
+			printf("in mop with point %d\n", point_id);
+			fflush(stdout);
+		}
+		printf("in omp id of point %d id of cluster %d id %d\n", point_id, cluster_id, my_id);
+		fflush(stdout);
+	}
+
+	printf("result of omp %d id %d\n", result_of_omp,my_id);
+	fflush(stdout);
+
+	good = cuda_end_check_points_transfer(cuda_points_id, cluster_amount, cuda_points_id_arr_pointers, cuda_transfer_points, cuda_transfer_points_leftover, cuda_result_pointer,cuda_cluster_points_amount, &result_of_cuda);
+	
+	printf("result of cuda %d id %d\n", result_of_cuda, my_id);
+	fflush(stdout);
+
+	if (good == 0)
+	{
+		return -1;
+	}
+
+	free(cuda_points_id_arr_pointers);
+	
+	return result_of_cuda + result_of_omp;
+
+
+}
+
+void realloc_lefover_transfer_point(int leftover, Transfer_Point** transfer_points_arr, int amount_with_lefover, Transfer_Point* transfer_points,int transfer_points_amount)
+{
+	if (leftover > 0)
+	{
+		*transfer_points_arr = (Transfer_Point*)realloc(*transfer_points_arr, sizeof(Transfer_Point)*amount_with_lefover);//freed
+#pragma omp parallel for shared(transfer_points, transfer_points_arr)
+		for (int i = leftover; i > 0; i--)
+		{
+			(*transfer_points_arr)[amount_with_lefover - i] = transfer_points[transfer_points_amount - i];
+		}
+	}
+}
+
+int cuda_start_check_points_transfer(int** points_id, int cluster_amount, int* cluster_points_amount,int** cuda_points_id_arr_pointers,int** cuda_cluster_points_amount, Transfer_Point* transfer_points,int** result, int*** cuda_points_id, Transfer_Point** cuda_transfer_points, Transfer_Point** cuda_transfer_points_leftover, int thread_per_block, int req_block, int leftover_threads, int leftover_block)
+{
+	Transfer_Point* transfer_points_offset_leftover = 0;
+	int good;
+	int res = 0;
+	int transfer_points_amount_leftover;
+
+	/*good = cuda_malloc_elements((void**)cuda_points_id, cluster_amount, 0, 0, sizeof(int*));
+	if (good == 0)
+	{
+		return good;
+	}*/
+
+	good = cuda_malloc_elements((void**)result, 1, 0, 0, sizeof(int));
+	if (good == 0)
+	{
+		return good;
+	}
+
+	good = cuda_copy_elements(*result, &res, 1, 0, 0, 0, sizeof(int), cudaMemcpyHostToDevice);
+	if (good == 0)
+	{
+		return good;
+	}
+
+	cuda_copy_matrix(cluster_points_amount, cluster_amount, (void***)cuda_points_id, (void**)points_id, sizeof(int*), sizeof(int), (void**)cuda_points_id_arr_pointers);
+	
+	/*for (int i = 0; i < cluster_amount; i++)//maybe omp
+	{
+		int amount = cluster_points_amount[i];
+		int* cuda_points_id_arr;
+		good = cuda_malloc_elements((void**)&cuda_points_id_arr, amount, 0, 0, sizeof(int));
+		cuda_points_id_arr_pointers[i] = cuda_points_id_arr;
+		if (good == 0)
+		{
+			return good;
+		}
+
+		good = cuda_copy_elements((void*)((*cuda_points_id) + i), &cuda_points_id_arr, 1, 0, 0, 0, sizeof(int*), cudaMemcpyHostToDevice);
+		if (good == 0)
+		{
+			return good;
+		}
+
+		good = cuda_copy_elements(cuda_points_id_arr, points_id[i], amount, 0, 0, 0, sizeof(int), cudaMemcpyHostToDevice);
+		if (good == 0)
+		{
+			return good;
+		}
+	}*/
+	
+	good = cuda_malloc_elements((void**)cuda_transfer_points, req_block*thread_per_block,(void**)cuda_transfer_points_leftover, leftover_block*leftover_threads, sizeof(Transfer_Point));
+	if (good == 0)
+	{
+		return good;
+	}
+
+	good = cuda_malloc_elements((void**)cuda_cluster_points_amount, cluster_amount, 0, 0, sizeof(int));
+	if (good == 0)
+	{
+		return good;
+	}
+
+	good = cuda_copy_elements(*cuda_cluster_points_amount, cluster_points_amount, cluster_amount, 0, 0, 0, sizeof(int), cudaMemcpyHostToDevice);
+	if (good == 0)
+	{
+		return good;
+	}
+
+	transfer_points_offset_leftover = transfer_points + req_block*thread_per_block;
+	transfer_points_amount_leftover = leftover_block*leftover_threads;
+
+	good = cuda_copy_elements(*cuda_transfer_points, transfer_points, req_block*thread_per_block, *cuda_transfer_points_leftover, transfer_points_offset_leftover, transfer_points_amount_leftover, sizeof(Transfer_Point), cudaMemcpyHostToDevice);
+	if (good == 0)
+	{
+		return good;
+	}
+
+	good = cuda_kernel_check_transfer_points(*result, *cuda_points_id,*cuda_cluster_points_amount,cluster_amount, *cuda_transfer_points, *cuda_transfer_points_leftover, thread_per_block, req_block, leftover_threads, leftover_block);
+	if (good == 0)
+	{
+		return good;
+	}
+
+	return 1;
+}
+
+int cuda_end_check_points_transfer(int** cuda_points_id, int cluster_amount, int** cuda_points_id_arr_pointers, Transfer_Point* cuda_transfer_points, Transfer_Point* cuda_transfer_points_leftover, int* cuda_result_pointer,int* cuda_cluster_points_amount, int* result_of_cuda)
+{
+	int good;
+	cudaError_t cudaStatus;
+	cudaStatus = cudaDeviceSynchronize();// error check
+	
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+
+	good = cuda_copy_elements(result_of_cuda, cuda_result_pointer, 1, 0, 0, 0, sizeof(int), cudaMemcpyDeviceToHost);
+	if (good == 0)
+	{
+		return good;
+	}
+
+//#pragma omp parallel for shared (cuda_points_id,good)
+//	for (int i = 0; i < cluster_amount; i++)
+//	{
+//		cudaStatus = cudaFree(cuda_points_id_arr_pointers[i]);
+//		if (cudaStatus != cudaSuccess)
+//		{
+//			good = 0;
+//		}
+//	}
+	
+
+	if (good == 0)
+	{
+		return good;
+	}
+
+	
+
+	cudaStatus = cudaFree(cuda_cluster_points_amount);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+
+	cudaStatus = cudaFree(cuda_points_id);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+	cudaStatus = cudaFree(cuda_transfer_points);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+	cudaStatus = cudaFree(cuda_transfer_points_leftover);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+	cudaStatus = cudaFree(cuda_result_pointer);
+	if (cudaStatus != cudaSuccess)
+	{
+		return 0;
+	}
+
+	return 1;
+}
+
+int check_exists_points_transfer(int* points_id, int points_id_amount, int transfer_point_id)
+{
+	int good = 0;
+	for (int i = 0; i < points_id_amount; i++)
+	{
+		if (points_id[i] == transfer_point_id)
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+double master_evaluate_qm(Cluster* clusters, int cluster_amount,int point_amount,int num_of_proc,MPI_Datatype axis_type, MPI_Datatype qm_point_type)
+{
+	char* buffer;//should free
+	int buffer_size;
+	int* cluster_points_amount;//shouyld free
+	int* cluster_points_offset;//should free
+	int amount_each_proc;
+	int amount_each_proc_leftover;
+	int amount_each_proc_with_leftover;
+	int flag = EVALUATE_QM;
+	Qm_Point* qm_points;//should free
+	Qm_Point* qm_points_arr;//should free
+
+	prepare_for_pack_elements(clusters, &cluster_points_amount, &cluster_points_offset, cluster_amount);
+	
+	buffer = malloc_packed_buffer(point_amount, sizeof(Axis), &buffer_size);
+
+	qm_points = (Qm_Point*)calloc(point_amount, sizeof(Qm_Point));
+	
+#pragma omp parallel for shared(clusters,cluster_points_offset,cluster_points_amount,buffer,buffer_size,axis_type)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		int current_cluster_offset = cluster_points_offset[i];
+		int current_cluster_offset_char = current_cluster_offset * sizeof(Axis);
+		int points_amount = cluster_points_amount[i];
+		
+		
+		for (int j = 0; j < points_amount; j++)
+		{
+			Axis point_axis = clusters[i].cluster_points[j].axis_location;
+			
+			Qm_Point* qm_point = (qm_points + current_cluster_offset + j);
+			qm_point->cluster_id = i;
+			qm_point->point_loc = point_axis;
+			pack_elements(&current_cluster_offset_char, buffer, buffer_size, &point_axis, 1, axis_type);
+		}
+	}
+
+	check_amounts_leftover(&amount_each_proc, point_amount, num_of_proc, &amount_each_proc_leftover);
+	
+	amount_each_proc_with_leftover = amount_each_proc + amount_each_proc_leftover;
+
+	//broad flag
+	broadcast_flag(&flag);
+	//broad cluster_amount//
+	broadcast_value(&cluster_amount, 1, MPI_INT);
+	//broad cluster_points_amount//
+	broadcast_value(cluster_points_amount, cluster_amount, MPI_INT);
+	//broad cluster_points_offset//
+	broadcast_value(cluster_points_offset, cluster_amount, MPI_INT);
+	//broad buffer_size//
+	broadcast_value(&buffer_size, 1, MPI_INT);
+	//broad buffer//
+	broadcast_value(buffer, buffer_size, MPI_PACKED);
+	//broad amount_each_proc
+	broadcast_value(&amount_each_proc, 1, MPI_INT);
+
+	qm_points_arr = (Qm_Point*)scater_elements(qm_points, amount_each_proc, sizeof(Qm_Point), qm_point_type);
+
+	realloc_lefover_qm_points(amount_each_proc_leftover, &qm_points_arr, amount_each_proc_with_leftover, qm_points, point_amount);
+	
+	/*for (int i = 0; i < amount_each_proc_with_leftover; i++)
+	{
+		printf("id %d cluster %d x %lf y %lf z %lf\n", my_id, qm_points_arr[i].cluster_id, qm_points_arr[i].point_loc.x, qm_points_arr[i].point_loc.y, qm_points_arr[i].point_loc.z);
+		fflush(stdout);
+	}*/
+
+
+
+
+}
+
+int slave_evaluate_qm(MPI_Datatype axis_type, MPI_Datatype qm_point_type)
+{
+	char* buffer;//should free
+	int buffer_size;
+	int cluster_amount;
+	int amount_each_proc;
+	int* cluster_points_amount;//shouyld free
+	int* cluster_points_offset;//should free
+	Axis** cluster_points_axis;//should free
+	Qm_Point* qm_points_arr;//should free
+
+
+
+	broadcast_value(&cluster_amount, 1, MPI_INT);
+
+	cluster_points_amount = (int*)calloc(cluster_amount, sizeof(int));
+	broadcast_value(cluster_points_amount,cluster_amount,MPI_INT);
+
+	cluster_points_offset = (int*)calloc(cluster_amount, sizeof(int));
+	broadcast_value(cluster_points_offset, cluster_amount, MPI_INT);
+
+	broadcast_value(&buffer_size, 1, MPI_INT);
+
+	buffer = (char*)calloc(buffer_size, sizeof(char));
+	broadcast_value(buffer, buffer_size, MPI_PACKED);
+
+	broadcast_value(&amount_each_proc, 1, MPI_INT);
+
+	qm_points_arr = (Qm_Point*) scater_elements(0, amount_each_proc, sizeof(Qm_Point), qm_point_type);
+
+	malloc_cluster_points(cluster_points_amount, (void***)&cluster_points_axis, cluster_amount, sizeof(Axis*), sizeof(Axis));
+	
+#pragma omp parallel for shared(cluster_points_offset,cluster_points_amount,buffer,buffer_size,cluster_points_axis,axis_type)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		int current_cluster_offset = cluster_points_offset[i] * sizeof(Axis);
+		int points_amount = cluster_points_amount[i];
+		unpack_elements(&current_cluster_offset, buffer, buffer_size, cluster_points_axis[i], points_amount, axis_type);
+	}
+
+	
+
+	return 1;
+
+}
+
+double* find_max_diameter(Axis** cluster_points_axis, Qm_Point* qm_points_arr, int* cluster_points_amount, int amount_each_proc, int cluster_amount,cudaDeviceProp device_prop)//put content in function
+{
+	Axis** cuda_cluster_points_axis = 0;//freed
+	Axis** cuda_cluster_points_axis_pointer = 0;//freed
+	Qm_Point* cuda_qm_points_arr = 0;//freed
+	Qm_Point* cuda_qm_points_arr_leftover = 0;//freed
+	Qm_Point* qm_points_lefover_offset;
+	Max_point_Diameter* cuda_max_qm_points_arr = 0;//freed
+	Max_point_Diameter* cuda_max_qm_points_arr_leftover = 0;//freed
+	Max_point_Diameter* max_qm_points_arr = 0;//freed
+	Max_point_Diameter* max_qm_points_offset = 0;
+	double* max_cluster;//shouldnt free
+
+	int thread_per_block;
+	int req_block;
+	int leftover_threads;
+	int leftover_block;
+	int good;
+	int cuda_amount;
+	int cuda_amount_leftover;
+
+	good = cuda_blocks_calculation(&thread_per_block, &req_block, &leftover_threads, &leftover_block, device_prop, amount_each_proc);
+	if (good == 0)
+	{
+		return 0;
+	}
+
+	cuda_amount = thread_per_block*req_block;
+	cuda_amount_leftover = leftover_threads*leftover_block;
+	qm_points_lefover_offset = qm_points_arr + cuda_amount;
+	
+	good = cuda_copy_matrix(cluster_points_amount, cluster_amount,(void***) &cuda_cluster_points_axis, (void**)cluster_points_axis, sizeof(Axis*), sizeof(Axis), (void**)cuda_cluster_points_axis_pointer);
+	if (good == 0)
+	{
+		return 0;
+	}
+
+	good = cuda_malloc_elements((void**)&cuda_qm_points_arr, cuda_amount,(void**) &cuda_qm_points_arr_leftover, cuda_amount_leftover, sizeof(Qm_Point));
+	if (good == 0)
+	{
+		return 0;
+	}
+
+	good = cuda_copy_elements(cuda_qm_points_arr, cluster_points_axis, cuda_amount, cuda_qm_points_arr_leftover, qm_points_lefover_offset, cuda_amount_leftover, sizeof(Qm_Point), cudaMemcpyHostToDevice);
+	if (good == 0)
+	{
+		return 0;
+	}
+
+	good = cuda_malloc_elements((void**)&cuda_max_qm_points_arr, cuda_amount, (void**)&cuda_max_qm_points_arr_leftover, cuda_amount_leftover, sizeof(Max_point_Diameter));
+	if (good == 0)
+	{
+		return 0;
+	}
+
+	//activate cuda calculation
+
+	max_qm_points_arr = (Max_point_Diameter*)calloc(amount_each_proc, sizeof(Max_point_Diameter));
+	max_qm_points_offset = max_qm_points_arr + cuda_amount;
+
+	good = cuda_copy_elements(max_qm_points_arr, cuda_max_qm_points_arr, cuda_amount, max_qm_points_offset, cuda_max_qm_points_arr_leftover, cuda_amount_leftover, sizeof(Max_point_Diameter), cudaMemcpyDeviceToHost);
+	if (good == 0)
+	{
+		return 0;
+	}
+
+	max_cluster = (double*)calloc(cluster_amount, sizeof(double));
+
+#pragma omp parallel for shared(amount_each_proc,max_qm_points_arr,max_cluster)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		for (int j = 0; j < amount_each_proc; j++)
+		{
+			if (max_qm_points_arr[j].cluster_id == i && max_qm_points_arr[j].max_diameter > max_cluster[i])
+			{
+				max_cluster[i] = max_qm_points_arr[j].max_diameter;
+			}
+		}
+	}
+
+	cuda_free_matrix((void**)cuda_cluster_points_axis_pointer,cluster_amount);
+	cudaFree(cuda_cluster_points_axis_pointer);
+	cudaFree(cuda_cluster_points_axis);
+	cudaFree(cuda_qm_points_arr);
+	cudaFree(cuda_qm_points_arr_leftover);
+	cudaFree(cuda_max_qm_points_arr);
+	cudaFree(cuda_max_qm_points_arr_leftover);
+	free(max_qm_points_arr);
+
+	return max_cluster;
+}
+
+void realloc_lefover_qm_points(int leftover, Qm_Point** qm_points_arr, int amount_with_leftover, Qm_Point* qm_points,int qm_points_amount)
+{
+	if (leftover > 0)
+	{
+		*qm_points_arr = (Qm_Point*)realloc(*qm_points_arr, sizeof(Qm_Point)*amount_with_leftover);//should free
+#pragma omp parallel for shared(qm_points, qm_points_arr)
+		for (int i = leftover; i > 0; i--)
+		{
+			(*qm_points_arr)[amount_with_leftover - i] = qm_points[qm_points_amount -i];
+		}
+	}
+}
+
+int cuda_copy_matrix(int* cluster_points_amount, int cluster_amount, void*** cuda_outer_arr,void** src_arr, int size_of_pointer, int size_of_element,void** cuda_arr_pointers)
+{
+	int good;
+
+	good = cuda_malloc_elements((void**)cuda_outer_arr, cluster_amount, 0, 0, size_of_pointer);
+	if (good == 0)
+	{
+		return good;
+	}
+
+	for (int i = 0; i < cluster_amount; i++)//maybe omp
+	{
+		int good;
+		int amount = cluster_points_amount[i];
+		void* cuda_elements = 0;
+		good = cuda_malloc_elements(&cuda_elements, amount, 0, 0, size_of_element);
+		cuda_arr_pointers[i] = cuda_elements;
+		if (good == 0)
+		{
+			return good;
+		}
+
+		good = cuda_copy_elements((void*)((*cuda_outer_arr) + i), &cuda_elements, 1, 0, 0, 0, size_of_pointer, cudaMemcpyHostToDevice);
+		if (good == 0)
+		{
+			return good;
+		}
+
+		good = cuda_copy_elements(cuda_elements, src_arr[i], amount, 0, 0, 0, size_of_element, cudaMemcpyHostToDevice);
+		if (good == 0)
+		{
+			return good;
+		}
+	}
+}
+
+int cuda_free_matrix(void** cuda_arr_pointers,int cluster_amount)
+{
+#pragma omp parallel for shared (cuda_arr_pointers)
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		cudaError_t cudaStatus;
+		cudaStatus = cudaFree(cuda_arr_pointers[i]);
+		if (cudaStatus != cudaSuccess)
+		{
+			return 0;
+		}
+	}
+}
+
+void malloc_cluster_points(int* cluster_points_amount, void*** cluster_points_element,int cluster_amount,int size_of_pointer,int size_of_element)
+{
+	*cluster_points_element = (void**)calloc(cluster_amount, size_of_pointer);
+
+	void** points_element = *cluster_points_element;
+
+	for (int i = 0; i < cluster_amount; i++)
+	{
+		//int x = cluster_points_amount[i];
+		points_element[i] = calloc(cluster_points_amount[i], size_of_element);
+		//printf("ddddd22222 %d %d\n", my_id, points_element[i]);
+		//fflush(stdout);
+	}
+	
 }
 
 void print_points(Point* points, int amount,int myid)

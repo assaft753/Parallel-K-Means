@@ -7,17 +7,13 @@ __global__ void kernel_points_position_calculation(Point* points, int jump, int 
 	int thread_index = threadIdx.x;
 	int block_index = blockIdx.x;
 	int offset = (jump*block_index) + thread_index;
-
 	Point* pos = points + offset;
-
 	Axis current_position = pos->axis_location;
 	Axis current_velocity = pos->axis_velocity;
 
 	pos->axis_location.x = current_position.x + t*current_velocity.x;
 	pos->axis_location.y = current_position.y + t*current_velocity.y;
 	pos->axis_location.z = current_position.z + t*current_velocity.z;
-		//if(pos->id == (500000 - 2))
-		//printf("in cuda1 point:[%d] id:[%d] %d\n", pos->id, myid);
 }
 
 __global__ void kernel_group_points(int* cluster_of_points, Point* points, int jump, Axis* clusters_center_axis, int cluster_amount)
@@ -51,7 +47,24 @@ __global__ void kernel_group_points(int* cluster_of_points, Point* points, int j
 	}
 
 	*int_pos = index;
-	//printf("in cuda2 thread:[%d] block:[%d] id:[%d] %d\n", thread_index, block_index);
+}
+
+__global__ void kernel_check_transfer_points(int* result, int** cuda_points_id, int* cuda_cluster_points_amount, int cluster_amount,Transfer_Point* cuda_transfer_points,int jump, int myid)
+{
+	int thread_index = threadIdx.x;
+	int block_index = blockIdx.x;
+	int offset = (jump*block_index) + thread_index;
+	Transfer_Point* current_transfer_point = cuda_transfer_points + offset;
+	
+	int cluster_id = current_transfer_point->cluster_id;
+	int point_id = current_transfer_point->point_id;
+	
+	if (cuda_check_exists_points_transfer(cuda_points_id[cluster_id], cuda_cluster_points_amount[cluster_id], point_id) == 0)
+	{
+		printf("in cuda with point %d\n", point_id);
+		*result = 1;
+	}
+	
 }
 
 __device__ double cuda_point_2_point_distance(Axis p1, Axis p2)
@@ -72,10 +85,21 @@ __device__ double cuda_point_2_point_distance(Axis p1, Axis p2)
 
 	return result;
 }
+__device__ int cuda_check_exists_points_transfer(int* points_id, int points_id_amount, int transfer_point_id)
+{
+	int good = 0;
+	for (int i = 0; i < points_id_amount; i++)
+	{
+		if (points_id[i] == transfer_point_id)
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
 
 __global__ void kernel_test(int myid)
 {
-	if(blockIdx.x == 2929-1)
 	printf("in cuda myid:[%d] thread:[%d] blockx:[%d] blocky:[%d] blockz:[%d]\n",myid,threadIdx.x,blockIdx.x,blockIdx.y,blockIdx.z);
 }
 
@@ -133,10 +157,36 @@ int cuda_kernel_group_points_to_clusters(int* cuda_cluster_of_points, int* cuda_
 	return 1;
 }
 
+int cuda_kernel_check_transfer_points(int* result, int** cuda_points_id,int* cuda_cluster_points_amount,int cluster_amount, Transfer_Point* cuda_transfer_points, Transfer_Point* cuda_transfer_points_leftover, int thread_per_block, int req_block, int leftover_threads, int leftover_block)
+{
+	int myid;
+	MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+	cudaError_t cudaStatus;
+	if (req_block > 0)
+	{
+		kernel_check_transfer_points << < req_block, thread_per_block >> > (result, cuda_points_id,cuda_cluster_points_amount,cluster_amount ,cuda_transfer_points, thread_per_block, myid);
+		cudaStatus = cudaGetLastError();
+		if (cudaStatus != cudaSuccess) {
+			return 0;
+		}
+	}
+
+	if (leftover_block > 0)
+	{
+		
+		kernel_check_transfer_points << < leftover_block, leftover_threads >> > (result, cuda_points_id, cuda_cluster_points_amount, cluster_amount, cuda_transfer_points_leftover,0, myid);
+		cudaStatus = cudaGetLastError();
+		if (cudaStatus != cudaSuccess) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 void test(int myid)
 {
-	kernel_test << <2929, 1024 >> > (0);
-	kernel_test << <1, 704>> > (-1);
+	kernel_test << <1, 2 >> > (myid);
+	kernel_test << <1, 1>> > (myid);
 }
 
 

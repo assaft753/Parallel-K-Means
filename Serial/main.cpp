@@ -25,16 +25,14 @@ int main()
 	int limit, t, i, n, max_n, good = 0;
 	double qm, dt,current_t, q;
 	new_cluster = init_data(&points, &clusters, &limit, &qm, &t, &dt);
+	print(&clusters, new_cluster, 5, points);
+	fflush(stdout);
 	max_n = t / dt;
 
 	t1 = MPI_Wtime();
-	calculate_points_positions(&points, 0.2);//0.1
+	calculate_points_positions(&points, 0);//0.1
 	group_points_to_clusters(&points, new_cluster, clusters.size);
 	calculate_cluster_center(new_cluster, &clusters, clusters.size);
-	t2 = MPI_Wtime();
-	printf("time %1.4f\n", t2 - t1);
-	fflush(stdout);
-	
 	
 	print(&clusters, new_cluster, 5, points);
 
@@ -51,11 +49,14 @@ int main()
 		//print(&clusters, new_cluster, 3, points);//
 		
 		good = check_points_transfer(clusters.clusters, new_cluster, clusters.size);
-		printf("\ngood = %d \n", good);//
+		//printf("\ngood = %d \n", good);//
 		//print(&clusters, new_cluster, 4, points);//
 		
+		print(&clusters, new_cluster, 5, points);
+		fflush(stdout);
+
 		copy_cluster(&clusters, &new_cluster);
-		print(&clusters, new_cluster, 5, points);//
+		//print(&clusters, new_cluster, 5, points);//
 		
 		if (good == 1)
 		{
@@ -71,14 +72,18 @@ int main()
 		}
 	}*/
 
-	/*if (good == 0)
+	if (good == 0)
 	{
 		printf("\n No clusters found\n");
 	}
 
 	free_points(&points);
 	free_clusters(&clusters);
-	free(new_cluster);*/
+	free(new_cluster);
+	
+	t2 = MPI_Wtime();
+	printf("time %1.4f\n", t2 - t1);
+	fflush(stdout);
 
 	return 0;
 }
@@ -91,7 +96,11 @@ Cluster * init_data(Points * points, Clusters * clusters, int * limit, double * 
 	Cluster* new_cluster = 0;
 	FILE *fp;
 	fp = fopen("C:\\Users\\Assaf Tayouri\\Documents\\Visual Studio 2015\\Projects\\K-Means\\abc.txt", "r");
-	fscanf(fp, "%d %d %d %lf %d %lf\n",&points_amount,&clusters_amount,t,dt,limit,qm);
+	//fscanf(fp, "%d %d %d %lf %d %lf\n",&points_amount,&clusters_amount,t,dt,limit,qm);
+	//fscanf(fp, "%lf\n", qm);
+	fscanf(fp, "%d %d %d %lf %d %lf\n", &points_amount, &clusters_amount, t, dt, limit, qm);
+
+	//printf("%d %d %d %lf %d %lf\n", points_amount, clusters_amount, *t, *dt, *limit, *qm);
 	
 	points->size = points_amount;
 	points->points = (Point*)calloc(points_amount, sizeof(Point));
